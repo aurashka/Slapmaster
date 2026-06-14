@@ -1,6 +1,6 @@
 {
-  "name": "Slam & Slap: RG Face-Off",
-  "description": "A 2-player mobile beating and hand-slapping game with selfie character customization, featuring local same-device dual play, reaction speed challenges, and interactive camera filters.",
+  "name": "Slam & slap",
+  "description": "Slam & slap: The ultimate 2-player hand-slapping and boxing face-off game with selfie customization, camera filters, local same-device dual play, online multiplayer, and adaptive smart AI modes.",
   "requestFramePermissions": [
     "camera"
   ],

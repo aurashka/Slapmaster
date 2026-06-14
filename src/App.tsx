@@ -6,8 +6,10 @@ import Menu from './components/Menu';
 import Setup from './components/Setup';
 import BoxingFight from './components/BoxingFight';
 import SlappingDuel from './components/SlappingDuel';
+import Splash from './components/Splash';
 
 export default function App() {
+  const [showSplash, setShowSplash] = useState<boolean>(true);
   const [activeView, setActiveView] = useState<GameMode>('menu');
   const [onlineSlot, setOnlineSlot] = useState<'local' | 'ai' | 'online_create' | 'online_join'>('local');
   const [gameSelection, setGameSelection] = useState<'boxing' | 'slap'>('boxing');
@@ -93,24 +95,36 @@ export default function App() {
         {/* Core view router */}
         <div className="flex-grow w-full h-full overflow-hidden relative z-10 pt-2 pb-0 md:pt-6">
           <AnimatePresence mode="wait">
-            {activeView === 'menu' && (
-              <motion.div 
-                key="menu-view"
-                initial={{ opacity: 0, scale: 0.98 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.98 }}
+            {showSplash ? (
+              <motion.div
+                key="splash-screen"
+                initial={{ opacity: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                transition={{ duration: 0.25 }}
                 className="w-full h-full"
               >
-                <Menu
-                  onSelectLocal={handleSelectLocal}
-                  onSelectAI={handleSelectAI}
-                  onSelectOnline={handleSelectOnline}
-                  onShowHowToPlay={() => setShowGuide(true)}
-                />
+                <Splash onEnter={() => setShowSplash(false)} />
               </motion.div>
+            ) : (
+              activeView === 'menu' && (
+                <motion.div 
+                  key="menu-view"
+                  initial={{ opacity: 0, scale: 0.98 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.98 }}
+                  className="w-full h-full"
+                >
+                  <Menu
+                    onSelectLocal={handleSelectLocal}
+                    onSelectAI={handleSelectAI}
+                    onSelectOnline={handleSelectOnline}
+                    onShowHowToPlay={() => setShowGuide(true)}
+                  />
+                </motion.div>
+              )
             )}
 
-            {activeView === 'setup' && (
+            {!showSplash && activeView === 'setup' && (
               <motion.div 
                 key="setup-view"
                 initial={{ opacity: 0, x: 50 }}
@@ -127,7 +141,7 @@ export default function App() {
               </motion.div>
             )}
 
-            {activeView === 'boxing_fight' && p1State && p2State && (
+            {!showSplash && activeView === 'boxing_fight' && p1State && p2State && (
               <motion.div 
                 key="boxing-match"
                 initial={{ opacity: 0 }}
@@ -146,7 +160,7 @@ export default function App() {
               </motion.div>
             )}
 
-            {activeView === 'slapping_duel' && p1State && p2State && (
+            {!showSplash && activeView === 'slapping_duel' && p1State && p2State && (
               <motion.div 
                 key="slapping-match"
                 initial={{ opacity: 0 }}
