@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Heart, RefreshCw, Home, Smartphone, Award, Star, ShieldAlert } from 'lucide-react';
 import { PlayerCustomization } from '../types';
@@ -18,9 +18,22 @@ interface SlappingDuelProps {
 export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit, isVsAI }: SlappingDuelProps) {
   const isOnline = !!roomId;
 
-  // 5 Lives / Hearts per player
+  // Max hearts for the opponent (Bot has extra lives on Hard/Nightmare)
+  const p2MaxHearts = useMemo(() => {
+    if (isVsAI || p2.id?.startsWith('bot_')) {
+      const botId = p2.id || '';
+      const botNameStr = p2.name.toLowerCase();
+      if (botId === 'bot_easy' || botNameStr.includes('easy')) return 6; // Easy is thoda hard, starts with 6 hearts
+      if (botId === 'bot_hard' || botNameStr.includes('hard')) return 8; // Hard has 8 hearts
+      if (botId === 'bot_nightmare' || botNameStr.includes('nightmare')) return 11; // Nightmare has 11 hearts
+      if (botId === 'bot_oneshot' || botNameStr.includes('oneshot')) return 5;
+    }
+    return 5;
+  }, [p2.id, p2.name, isVsAI]);
+
+  // Hearts representing health
   const [p1Hearts, setP1Hearts] = useState<number>(5);
-  const [p2Hearts, setP2Hearts] = useState<number>(5);
+  const [p2Hearts, setP2Hearts] = useState<number>(p2MaxHearts);
 
   // Attacker index: 0 is P1/Red, 1 is P2/Green
   const [attackerIndex, setAttackerIndex] = useState<0 | 1>(0);
@@ -48,6 +61,9 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit, isVsA
   const stateActive = countdown === null && !winner;
   const stateActiveRef = useRef<boolean>(false);
   stateActiveRef.current = stateActive;
+
+  // Tracks human player slaps to detect excessive button spamming
+  const p1SlapTimestamps = useRef<number[]>([]);
 
   // Networking sync buffers
   const networkActionBuffer = useRef<'slap' | 'fake' | 'dodge' | 'idle'>('idle');
@@ -430,8 +446,17 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit, isVsA
       // AI reaction triggers as defender if VS AI
       const opponentIsBot = isVsAI || (onlineSide === undefined && (p2.name.includes('Bot') || p2.id?.startsWith('bot_')));
       if (opponentIsBot && p2State === 'idle') {
-        let reactChance = 0.40;
-        let reactDelay = 130;
+        const nowTime = Date.now();
+        if (!p1SlapTimestamps.current) {
+          p1SlapTimestamps.current = [];
+        }
+        // Keep only last 2.2 seconds of slap actions to detect button spamming
+        p1SlapTimestamps.current = p1SlapTimestamps.current.filter(t => nowTime - t < 2200);
+        p1SlapTimestamps.current.push(nowTime);
+        const isSpamming = p1SlapTimestamps.current.length >= 2;
+
+        let reactChance = 0.45;
+        let reactDelay = 110;
 
         const botIdStr = p2.id || '';
         const botNameStr = p2.name.toLowerCase();
@@ -441,17 +466,21 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit, isVsA
         const isOneshot = botIdStr === 'bot_oneshot' || botNameStr.includes('oneshot');
 
         if (isEasy) {
-          reactChance = 0.18;
-          reactDelay = 160;
+          reactChance = isSpamming ? 0.82 : 0.28;
+          reactDelay = isSpamming ? 40 : 130;
         } else if (isHard) {
-          reactChance = 0.55;
-          reactDelay = 95;
+          reactChance = isSpamming ? 0.95 : 0.65;
+          reactDelay = isSpamming ? 20 : 75;
         } else if (isNightmare) {
-          reactChance = 0.85;
-          reactDelay = 60;
+          reactChance = isSpamming ? 0.99 : 0.92;
+          reactDelay = isSpamming ? 10 : 35;
         } else if (isOneshot) {
-          reactChance = 0.92;
-          reactDelay = 40;
+          reactChance = isSpamming ? 1.00 : 0.98;
+          reactDelay = isSpamming ? 5 : 20;
+        }
+
+        if (isSpamming) {
+          addLog(`⚡ ${p2.name} ACTIVE DEFENSE: ANTI-SPAM DODGING!`, 'dodge');
         }
 
         if (Math.random() < reactChance) {
@@ -702,7 +731,7 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit, isVsA
 
   const handleRematch = () => {
     setP1Hearts(5);
-    setP2Hearts(5);
+    setP2Hearts(p2MaxHearts);
     setP1Penalties(0);
     setP2Penalties(0);
     setP1State('idle');
@@ -812,8 +841,8 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit, isVsA
               </span>
 
               {/* Heart icons representing health */}
-              <div className="flex space-x-0.5">
-                {[...Array(5)].map((_, i) => (
+              <div className="flex space-x-0.5 max-w-[200px] flex-wrap justify-end">
+                {[...Array(p2MaxHearts)].map((_, i) => (
                   <Heart
                     key={i}
                     className={`w-3.5 h-3.5 ${
@@ -964,10 +993,10 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit, isVsA
       </div>
 
       {/* 3. CONTROL PADS SPANELS SPLIT-GRID */}
-      <div className={`w-full shrink-0 ${isLocalSamePhone ? 'p-2 bg-slate-950 border-t border-slate-900' : 'h-52 grid grid-rows-2 border-t border-slate-900 bg-slate-950 relative z-20'}`}>
+      <div className={`w-full shrink-0 ${isLocalSamePhone ? 'p-2 bg-slate-950 border-t border-slate-900' : isVsAI ? 'h-26 border-t border-slate-900 relative z-20 bg-slate-950' : 'h-52 grid grid-rows-2 border-t border-slate-900 bg-slate-950 relative z-20'}`}>
         
         {/* PLAYER GREEN (TOP) CONTROLS PANEL */}
-        {!isLocalSamePhone && (
+        {!isLocalSamePhone && !isVsAI && (
           <div className="p-2 bg-slate-950 border-b border-slate-900/60 flex items-center justify-center relative select-none">
             {!showOpponentPlayerControls && (
               <div className="absolute inset-0 bg-black/75 z-40 flex items-center justify-center border-b border-slate-850">

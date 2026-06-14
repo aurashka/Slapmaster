@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Shield, Sparkles, Zap, Heart, RotateCcw, Home, RefreshCw, Smartphone } from 'lucide-react';
 import { PlayerCustomization, PlayerAction } from '../types';
@@ -27,8 +27,20 @@ export default function BoxingFight({ p1, p2, roomId, onlineSide, onQuit, isVsAI
   const isOnline = !!roomId;
   
   // Players battle states
+  const p2MaxHealth = useMemo(() => {
+    if (isVsAI || p2.id?.startsWith('bot_')) {
+      const botId = p2.id || '';
+      const botNameStr = p2.name.toLowerCase();
+      if (botId === 'bot_easy' || botNameStr.includes('easy')) return 120; // Easy starts with 120 (harder!)
+      if (botId === 'bot_hard' || botNameStr.includes('hard')) return 160; // Hard starts with 160
+      if (botId === 'bot_nightmare' || botNameStr.includes('nightmare')) return 220; // Nightmare starts with 220
+      if (botId === 'bot_oneshot' || botNameStr.includes('oneshot')) return 100; // Oneshot starts with 100
+    }
+    return 100;
+  }, [p2.id, p2.name, isVsAI]);
+
   const [p1Health, setP1Health] = useState<number>(100);
-  const [p2Health, setP2Health] = useState<number>(100);
+  const [p2Health, setP2Health] = useState<number>(p2MaxHealth);
   
   const [p1Stamina, setP1Stamina] = useState<number>(100);
   const [p2Stamina, setP2Stamina] = useState<number>(100);
@@ -42,6 +54,9 @@ export default function BoxingFight({ p1, p2, roomId, onlineSide, onQuit, isVsAI
 
   // Ticker and combat logs
   const [combatLogs, setCombatLogs] = useState<{ id: string; text: string; color: string }[]>([]);
+
+  // Tracks human player punches to detect excessive button spamming
+  const p1PunchTimestamps = useRef<number[]>([]);
 
   // Stun states (block broken)
   const [p1Stunned, setP1Stunned] = useState<boolean>(false);
@@ -98,10 +113,7 @@ export default function BoxingFight({ p1, p2, roomId, onlineSide, onQuit, isVsAI
       // Offline local AI loop
       const isOpponentAI = isVsAI || (onlineSide === undefined && (p2.name.includes('Bot') || p2.id?.startsWith('bot_')));
       if (isOpponentAI) {
-        let attackThreshold = 0.20;
-        let actionInterval = 380;
-        let blockChance = 0.12;
-        let dodgeChance = 0.08;
+        let actionInterval = 420;
 
         const botIdStr = p2.id || '';
         const botNameStr = p2.name.toLowerCase();
@@ -111,37 +123,77 @@ export default function BoxingFight({ p1, p2, roomId, onlineSide, onQuit, isVsAI
         const isOneshot = botIdStr === 'bot_oneshot' || botNameStr.includes('oneshot');
 
         if (isEasy) {
-          attackThreshold = 0.16;
-          blockChance = 0.06;
-          dodgeChance = 0.04;
-          actionInterval = 480;
+          actionInterval = 550; // slightly more active than before, but leaves open windows
         } else if (isHard) {
-          attackThreshold = 0.35;
-          blockChance = 0.12;
-          dodgeChance = 0.10;
-          actionInterval = 280;
+          actionInterval = 320; // fast and aggressive
         } else if (isNightmare) {
-          attackThreshold = 0.44;
-          blockChance = 0.15;
-          dodgeChance = 0.15;
-          actionInterval = 195;
+          actionInterval = 190; // extremely active
         } else if (isOneshot) {
-          attackThreshold = 0.38;
-          blockChance = 0.14;
-          dodgeChance = 0.18;
-          actionInterval = 230;
+          actionInterval = 210; // very active, fatal damage
         }
         
         const aiInterval = setInterval(() => {
           if (!matchActiveRef.current || p2Stunned) return;
           
           const rand = Math.random();
-          if (rand < attackThreshold) {
-            p2PerformAction(rand < (attackThreshold / 2) ? 'punch_left' : 'punch_right');
-          } else if (rand < attackThreshold + blockChance) {
-            p2PerformAction('block');
-          } else if (rand < attackThreshold + blockChance + dodgeChance) {
-            p2PerformAction('dodge');
+          // Strategic stamina check
+          if (p2Stamina < 20) {
+            // Low stamina - defensive strategies to recover stamina
+            p2PerformAction(rand < 0.65 ? 'block' : 'dodge');
+            return;
+          }
+
+          if (isNightmare || isOneshot) {
+            // Nightmare & Oneshot ultra instinct behaviors
+            if (p1Action.startsWith('punch')) {
+              // React to player's active punched attacks
+              p2PerformAction(Math.random() < 0.45 ? 'dodge' : 'block');
+              return;
+            }
+            if (rand < 0.60) {
+              // Rapid hook sequence
+              p2PerformAction('punch_left');
+              setTimeout(() => {
+                if (matchActiveRef.current && !p2Stunned && p2Stamina > 20) {
+                  p2PerformAction('punch_right');
+                }
+              }, 100);
+            } else if (rand < 0.85) {
+              // Dodge and punish sequence!
+              p2PerformAction('dodge');
+              setTimeout(() => {
+                if (matchActiveRef.current && !p2Stunned && p2Stamina > 20) {
+                  p2PerformAction(Math.random() < 0.5 ? 'punch_left' : 'punch_right');
+                }
+              }, 180);
+            } else {
+              p2PerformAction('block');
+            }
+          } else if (isHard) {
+            // Hard strategic combo behaviors
+            if (rand < 0.40) {
+              p2PerformAction('punch_right');
+            } else if (rand < 0.70) {
+              p2PerformAction('punch_left');
+              setTimeout(() => {
+                if (matchActiveRef.current && !p2Stunned && p2Stamina > 20) {
+                  p2PerformAction('punch_right');
+                }
+              }, 150);
+            } else if (rand < 0.88) {
+              p2PerformAction('block');
+            } else {
+              p2PerformAction('dodge');
+            }
+          } else {
+            // Easy strategic actions - simple, reactive
+            if (rand < 0.38) {
+              p2PerformAction(Math.random() < 0.5 ? 'punch_left' : 'punch_right');
+            } else if (rand < 0.55) {
+              p2PerformAction('block');
+            } else if (rand < 0.65) {
+              p2PerformAction('dodge');
+            }
           }
         }, actionInterval);
         
@@ -347,7 +399,15 @@ export default function BoxingFight({ p1, p2, roomId, onlineSide, onQuit, isVsAI
       if (p2Action === 'block') {
         playBlockSound();
         addLog(`🛡️ ${p2.name} blocked ${p1.name}!`, 'block');
-        setP2Stamina(prev => Math.max(0, prev - 18));
+        
+        let blockCost = 18;
+        if (isVsAI || p2.id?.startsWith('bot_')) {
+          const botIdStr = p2.id || '';
+          if (botIdStr === 'bot_hard') blockCost = 13;
+          else if (botIdStr === 'bot_nightmare') blockCost = 8;
+          else if (botIdStr === 'bot_oneshot') blockCost = 5;
+        }
+        setP2Stamina(prev => Math.max(0, prev - blockCost));
         return;
       }
       
@@ -355,9 +415,30 @@ export default function BoxingFight({ p1, p2, roomId, onlineSide, onQuit, isVsAI
       playHitSound();
       addBurst(true);
       setP2Action('hit');
-      addLog(`💥 ${p1.name} hit ${p2.name}!`, 'hit');
+      
+      let playerDamage = 10;
+      if (isVsAI || p2.id?.startsWith('bot_')) {
+        const botIdStr = p2.id || '';
+        const botNameStr = p2.name.toLowerCase();
+        const isEasy = botIdStr === 'bot_easy' || botNameStr.includes('easy');
+        const isHard = botIdStr === 'bot_hard' || botNameStr.includes('hard');
+        const isNightmare = botIdStr === 'bot_nightmare' || botNameStr.includes('nightmare');
+        const isOneshot = botIdStr === 'bot_oneshot' || botNameStr.includes('oneshot');
+
+        if (isEasy) {
+          playerDamage = 11; // normal
+        } else if (isHard) {
+          playerDamage = 7.5; // Armor Mode reduces player punch impact
+        } else if (isNightmare) {
+          playerDamage = 5.5; // Heavy Boss Armor
+        } else if (isOneshot) {
+          playerDamage = 10;
+        }
+      }
+      
+      addLog(`💥 ${p1.name} hit ${p2.name} for ${Math.round(playerDamage)} dmg!`, 'hit');
       setP2Health(prev => {
-        const next = Math.max(0, prev - 10);
+        const next = Math.max(0, prev - playerDamage);
         if (next === 0) triggerMatchWin(p1);
         return next;
       });
@@ -383,10 +464,11 @@ export default function BoxingFight({ p1, p2, roomId, onlineSide, onQuit, isVsAI
       let damage = 10;
       if (isVsAI || p2.id?.startsWith('bot_')) {
         const botId = p2.id || '';
-        if (botId === 'bot_easy') damage = 7;
-        else if (botId === 'bot_hard') damage = 10;
-        else if (botId === 'bot_nightmare') damage = 16;
-        else if (botId === 'bot_oneshot') damage = 100; // Absolute One-Shot fatal power!
+        const botNameStr = p2.name.toLowerCase();
+        if (botId === 'bot_easy' || botNameStr.includes('easy')) damage = 8;
+        else if (botId === 'bot_hard' || botNameStr.includes('hard')) damage = 14;
+        else if (botId === 'bot_nightmare' || botNameStr.includes('nightmare')) damage = 22; // Extreme heavy strike
+        else if (botId === 'bot_oneshot' || botNameStr.includes('oneshot')) damage = 100; // Absolute One-Shot fatal power!
       }
       addLog(`💥 ${p2.name} hit ${p1.name} for ${damage} dmg!`, 'hit');
       setP1Health(prev => {
@@ -434,8 +516,16 @@ export default function BoxingFight({ p1, p2, roomId, onlineSide, onQuit, isVsAI
     // AI reactive triggers if P1 punches and playing VS AI
     const opponentIsBot = isVsAI || (onlineSide === undefined && (p2.name.includes('Bot') || p2.id?.startsWith('bot_')));
     if (act.startsWith('punch') && opponentIsBot && !p2Stunned && p2Action === 'idle') {
-      let reactionChance = 0.45;
-      let reactionDelay = 150;
+      const nowTime = Date.now();
+      if (!p1PunchTimestamps.current) {
+        p1PunchTimestamps.current = [];
+      }
+      p1PunchTimestamps.current = p1PunchTimestamps.current.filter(t => nowTime - t < 1400);
+      p1PunchTimestamps.current.push(nowTime);
+      const isSpamming = p1PunchTimestamps.current.length >= 3;
+
+      let reactionChance = 0.50;
+      let reactionDelay = 130;
       
       const botIdStr = p2.id || '';
       const botNameStr = p2.name.toLowerCase();
@@ -445,23 +535,27 @@ export default function BoxingFight({ p1, p2, roomId, onlineSide, onQuit, isVsAI
       const isOneshot = botIdStr === 'bot_oneshot' || botNameStr.includes('oneshot');
 
       if (isEasy) {
-        reactionChance = 0.15;
-        reactionDelay = 180;
+        reactionChance = isSpamming ? 0.70 : 0.28;
+        reactionDelay = isSpamming ? 95 : 160;
       } else if (isHard) {
-        reactionChance = 0.60;
-        reactionDelay = 100;
+        reactionChance = isSpamming ? 0.92 : 0.65;
+        reactionDelay = isSpamming ? 40 : 95;
       } else if (isNightmare) {
-        reactionChance = 0.85;
-        reactionDelay = 70;
+        reactionChance = isSpamming ? 0.98 : 0.88;
+        reactionDelay = isSpamming ? 20 : 65;
       } else if (isOneshot) {
-        reactionChance = 0.90;
-        reactionDelay = 50;
+        reactionChance = isSpamming ? 0.99 : 0.92;
+        reactionDelay = isSpamming ? 10 : 40;
+      }
+
+      if (isSpamming) {
+        addLog(`⚡ ${p2.name} ACTIVE COUNTER: ANTI-SPAM EVASION!`, 'dodge');
       }
 
       if (Math.random() < reactionChance) {
         setTimeout(() => {
           if (matchActiveRef.current && !p2Stunned) {
-            const defense = Math.random() < 0.55 ? 'block' : 'dodge';
+            const defense = Math.random() < 0.40 ? 'block' : 'dodge';
             p2PerformAction(defense);
           }
         }, reactionDelay); // micro reflex speed delay
@@ -606,7 +700,7 @@ export default function BoxingFight({ p1, p2, roomId, onlineSide, onQuit, isVsAI
 
   const handleRematch = () => {
     setP1Health(100);
-    setP2Health(100);
+    setP2Health(p2MaxHealth);
     setP1Stamina(100);
     setP2Stamina(100);
     setP1Action('idle');
@@ -618,8 +712,8 @@ export default function BoxingFight({ p1, p2, roomId, onlineSide, onQuit, isVsAI
   };
 
   const showActivePlayerControls = onlineSide === undefined || onlineSide === 0;
-  const showOpponentPlayerControls = onlineSide === undefined || onlineSide === 1;
-  const isLocalSamePhone = !isOnline && onlineSide === undefined;
+  const showOpponentPlayerControls = (onlineSide === undefined || onlineSide === 1) && !isVsAI;
+  const isLocalSamePhone = !isOnline && onlineSide === undefined && !isVsAI;
 
   return (
     <div className="flex flex-col h-full w-full bg-slate-950 text-white font-sans overflow-hidden relative select-none justify-between">
@@ -862,10 +956,10 @@ export default function BoxingFight({ p1, p2, roomId, onlineSide, onQuit, isVsAI
       </div>
 
       {/* 3. SCREEN PANELS SPLIT-GRID FOR ACTION BUTTON CONTROLS (only if NOT same phone split) */}
-      <div className={`w-full shrink-0 ${isLocalSamePhone ? 'p-2 bg-slate-950 border-t border-slate-900' : 'h-52 grid grid-rows-2 border-t border-slate-900 z-20 relative bg-slate-950'}`}>
+      <div className={`w-full shrink-0 ${isLocalSamePhone ? 'p-2 bg-slate-950 border-t border-slate-900' : isVsAI ? 'h-26 border-t border-slate-900 z-20 relative bg-slate-950' : 'h-52 grid grid-rows-2 border-t border-slate-900 z-20 relative bg-slate-950'}`}>
         
         {/* PLAYER GREEN (TOP) CONTROLS ROW */}
-        {!isLocalSamePhone && (
+        {!isLocalSamePhone && !isVsAI && (
           <div className="p-2 bg-slate-950 border-b border-slate-900/60 flex items-center justify-center select-none relative">
             {!showOpponentPlayerControls && (
               <div className="absolute inset-0 bg-black/75 z-40 flex items-center justify-center border-b border-slate-850">
