@@ -3,6 +3,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Heart, RefreshCw, Home, Smartphone, Award, Star, ShieldAlert } from 'lucide-react';
 import { PlayerCustomization } from '../types';
 import { playSlapSound, playPunchSound, playHitSound, playFanfare, playDefeatSound, playCountdownBeep } from '../utils/audio';
+import { db } from '../lib/firebase';
+import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 
 interface SlappingDuelProps {
   p1: PlayerCustomization; // Red Fighter
@@ -91,79 +93,60 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
       return;
     }
 
-    // Polling sync endpoint
-    const pollInterval = setInterval(async () => {
+    // Bidirectional Live Firestore room subscription
+    const docRef = doc(db, 'rooms', roomId!);
+    let lastHandledOpponentTimestamp = 0;
+
+    const unsubscribe = onSnapshot(docRef, (docSnap) => {
+      if (!docSnap.exists() || !stateActiveRef.current) return;
+      const data = docSnap.data();
+
       const isHost = onlineSide === 0;
-      const mySlot = onlineSide!;
-      const myHearts = isHost ? p1Hearts : p2Hearts;
-      const opponentLife = isHost ? p2Hearts : p1Hearts;
+      const oppKey = isHost ? 'p2' : 'p1';
+      const oppData = data[oppKey];
 
-      try {
-        const res = await fetch(`/api/rooms/${roomId}/sync`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            playerIndex: mySlot,
-            health: myHearts, // Map lives directly to sync health slot
-            energy: attackerIndex === mySlot ? 1 : 0, // Energy 1 indicates Attacker role
-            action: networkActionBuffer.current,
-            status: winner ? 'ended' : 'playing'
-          })
-        });
+      if (oppData) {
+        // Synchronize remote life/hearts
+        if (isHost) {
+          setP2Hearts(oppData.health);
+        } else {
+          setP1Hearts(oppData.health);
+        }
 
-        if (res.ok) {
-          const data = await res.json();
-          lobbyLastUpdate.current = timestampNow();
-          networkActionBuffer.current = 'idle';
+        // Fire remote animations on action detection
+        if (oppData.action && oppData.action !== 'idle' && oppData.lastActive > lastHandledOpponentTimestamp) {
+          lastHandledOpponentTimestamp = oppData.lastActive;
 
-          // Sync game states
-          if (isHost) {
-            if (data.p2) {
-              setP2Hearts(data.p2.health);
-              // Opponent actions sync
-              if (data.p2.action === 'slap') {
-                opponentsSlap(1, isHost);
-              } else if (data.p2.action === 'fake') {
-                opponentsFake(1, isHost);
-              } else if (data.p2.action === 'dodge') {
-                opponentsDodge(1, isHost);
-              }
-            }
-          } else {
-            if (data.p1) {
-              setP1Hearts(data.p1.health);
-              if (data.p1.action === 'slap') {
-                opponentsSlap(0, isHost);
-              } else if (data.p1.action === 'fake') {
-                opponentsFake(0, isHost);
-              } else if (data.p1.action === 'dodge') {
-                opponentsDodge(0, isHost);
-              }
-            }
-          }
-
-          // Role coordination sync
-          if (data.p1 && data.p2) {
-            // Re-align roles according to master server coordinator (Host sets, Guest syncs)
-            if (!isHost) {
-              setAttackerIndex(data.p1.energy === 1 ? 0 : 1);
-            }
-          }
-
-          if (data.status === 'ended' || data.p1?.health <= 0 || data.p2?.health <= 0) {
-            if (data.p1?.health <= 0 && !winner) {
-              triggerMatchWin(p2);
-            } else if (data.p2?.health <= 0 && !winner) {
-              triggerMatchWin(p1);
-            }
+          const oppIndex = isHost ? 1 : 0;
+          if (oppData.action === 'slap') {
+            opponentsSlap(oppIndex, isHost);
+          } else if (oppData.action === 'fake') {
+            opponentsFake(oppIndex, isHost);
+          } else if (oppData.action === 'dodge') {
+            opponentsDodge(oppIndex, isHost);
           }
         }
-      } catch (err) {
-        console.error('Lobby synchronization failed', err);
       }
-    }, 220);
 
-    return () => clearInterval(pollInterval);
+      // Synchronize role alignment (Host energy determines attacker role)
+      if (data.p1) {
+        const expectedAttacker = data.p1.energy === 1 ? 0 : 1;
+        if (attackerIndex !== expectedAttacker) {
+          setAttackerIndex(expectedAttacker);
+        }
+      }
+
+      // Sync termination conditions
+      if (data.status === 'ended' || (data.p1 && data.p1.health <= 0) || (data.p2 && data.p2.health <= 0)) {
+        if (data.p1?.health <= 0 && !winner) {
+          triggerMatchWin(p2);
+        } else if (data.p2?.health <= 0 && !winner) {
+          triggerMatchWin(p1);
+        }
+      }
+    });
+
+    return () => unsubscribe();
   }, [isOnline, p1Hearts, p2Hearts, attackerIndex, onlineSide, p1State, p2State, winner]);
 
   // Helper AI mechanisms
@@ -323,12 +306,45 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
     }
   };
 
+  // Symmetrical Firestore state synchronizer
+  useEffect(() => {
+    if (!isOnline || !roomId || winner) return;
+
+    const isHost = onlineSide === 0;
+    const docRef = doc(db, 'rooms', roomId);
+
+    if (isHost) {
+      updateDoc(docRef, {
+        'p1.health': p1Hearts,
+        'p1.energy': attackerIndex === 0 ? 1 : 0,
+        'p1.lastActive': Date.now()
+      }).catch(() => {});
+    } else {
+      updateDoc(docRef, {
+        'p2.health': p2Hearts,
+        'p2.energy': attackerIndex === 1 ? 1 : 0,
+        'p2.lastActive': Date.now()
+      }).catch(() => {});
+    }
+  }, [p1Hearts, p2Hearts, attackerIndex, isOnline, winner]);
+
   // Local Tapping actions
   const tapSlap = (playerIdx: 0 | 1) => {
     if (!stateActive || attackerIndex !== playerIdx) return;
     
     if (isOnline) {
-      networkActionBuffer.current = 'slap';
+      const docRef = doc(db, 'rooms', roomId!);
+      if (onlineSide === 0) {
+        updateDoc(docRef, {
+          'p1.action': 'slap',
+          'p1.lastActive': Date.now()
+        }).catch(() => {});
+      } else {
+        updateDoc(docRef, {
+          'p2.action': 'slap',
+          'p2.lastActive': Date.now()
+        }).catch(() => {});
+      }
     }
 
     if (playerIdx === 0) {
@@ -389,7 +405,18 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
     if (!stateActive || attackerIndex !== playerIdx) return;
 
     if (isOnline) {
-      networkActionBuffer.current = 'fake';
+      const docRef = doc(db, 'rooms', roomId!);
+      if (onlineSide === 0) {
+        updateDoc(docRef, {
+          'p1.action': 'fake',
+          'p1.lastActive': Date.now()
+        }).catch(() => {});
+      } else {
+        updateDoc(docRef, {
+          'p2.action': 'fake',
+          'p2.lastActive': Date.now()
+        }).catch(() => {});
+      }
     }
 
     if (playerIdx === 0) {
@@ -441,15 +468,36 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
     if (!stateActive || attackerIndex === playerIdx) return; // Attacker cannot dodge!
 
     if (isOnline) {
-      networkActionBuffer.current = 'dodge';
+      const docRef = doc(db, 'rooms', roomId!);
+      if (onlineSide === 0) {
+        updateDoc(docRef, {
+          'p1.action': 'dodge',
+          'p1.lastActive': Date.now()
+        }).catch(() => {});
+      } else {
+        updateDoc(docRef, {
+          'p2.action': 'dodge',
+          'p2.lastActive': Date.now()
+        }).catch(() => {});
+      }
     }
 
     if (playerIdx === 0) {
       setP1State('dodging');
-      setTimeout(() => setP1State('idle'), 450);
+      setTimeout(() => {
+        setP1State('idle');
+        if (isOnline && onlineSide === 0) {
+          updateDoc(doc(db, 'rooms', roomId!), { 'p1.action': 'idle' }).catch(() => {});
+        }
+      }, 450);
     } else {
       setP2State('dodging');
-      setTimeout(() => setP2State('idle'), 450);
+      setTimeout(() => {
+        setP2State('idle');
+        if (isOnline && onlineSide === 1) {
+          updateDoc(doc(db, 'rooms', roomId!), { 'p2.action': 'idle' }).catch(() => {});
+        }
+      }, 450);
     }
   };
 

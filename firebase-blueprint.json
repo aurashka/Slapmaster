@@ -1,0 +1,45 @@
+{
+  "entities": {
+    "Room": {
+      "title": "Room",
+      "description": "Represents a real-time multiplayer duel match room containing state and actions for both players.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The unique 4-digit room code."
+        },
+        "gameMode": {
+          "type": "string",
+          "enum": ["boxing_fight", "slapping_duel"],
+          "description": "Selected combat gaming mode."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["lobby", "playing", "ended"],
+          "description": "Match progression status indicator."
+        },
+        "p1": {
+          "type": "object",
+          "description": "Player 1 (Red) state and actions."
+        },
+        "p2": {
+          "type": "object",
+          "description": "Player 2 (Green) state and actions."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of the last tick action."
+        }
+      },
+      "required": ["id", "gameMode", "status"]
+    }
+  },
+  "firestore": {
+    "/rooms/{roomId}": {
+      "schema": "Room",
+      "description": "A collection containing active gaming rooms."
+    }
+  }
+}

@@ -3,6 +3,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Shield, Sparkles, Zap, Heart, RotateCcw, Home, RefreshCw, Smartphone } from 'lucide-react';
 import { PlayerCustomization, PlayerAction } from '../types';
 import { playPunchSound, playHitSound, playBlockSound, playFanfare, playDefeatSound } from '../utils/audio';
+import { db } from '../lib/firebase';
+import { doc, onSnapshot, updateDoc, getDoc } from 'firebase/firestore';
 
 interface BoxingFightProps {
   p1: PlayerCustomization; // Red Fighter
@@ -97,70 +99,116 @@ export default function BoxingFight({ p1, p2, roomId, onlineSide, onQuit }: Boxi
       return;
     }
 
-    // Bidirectional Room polling
-    const pollInterval = setInterval(async () => {
-      if (!matchActiveRef.current && timestampNow() - lobbyLastUpdate.current < 2000) {
-        // Keep active light exchange to sync game termination triggers
-      }
+    // Bidirectional Firestore game status synchronization
+    const docRef = doc(db, 'rooms', roomId!);
+    let lastHandledOpponentTimestamp = 0;
+
+    const unsubscribe = onSnapshot(docRef, (docSnap) => {
+      if (!docSnap.exists() || !matchActiveRef.current) return;
+      const data = docSnap.data();
 
       const isHost = onlineSide === 0;
-      const mySlot = onlineSide!;
-      const myHealth = isHost ? p1Health : p2Health;
-      const myStamina = isHost ? p1Stamina : p2Stamina;
-      
-      try {
-        const res = await fetch(`/api/rooms/${roomId}/sync`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            playerIndex: mySlot,
-            health: myHealth,
-            energy: myStamina,
-            action: localActionBuffer.current,
-            status: winner ? 'ended' : 'playing'
-          })
-        });
 
-        if (res.ok) {
-          const data = await res.json();
-          lobbyLastUpdate.current = timestampNow();
-          
-          // Clear current myAction buffer if synced
-          localActionBuffer.current = 'idle';
+      // Retrieve keys for sync variables
+      const oppKey = isHost ? 'p2' : 'p1';
+      const oppData = data[oppKey];
 
-          // Set client variables for OPPONENT
-          if (isHost) {
-            // Host receives details of P2 (Green)
-            if (data.p2) {
-              setP2Health(data.p2.health);
-              setP2Stamina(data.p2.energy);
-              setP2Action(data.p2.action as PlayerAction);
+      if (oppData) {
+        // Sync opponent status variables
+        if (isHost) {
+          setP2Health(oppData.health);
+          setP2Stamina(oppData.energy);
+          setP2Action(oppData.action as PlayerAction);
+        } else {
+          setP1Health(oppData.health);
+          setP1Stamina(oppData.energy);
+          setP1Action(oppData.action as PlayerAction);
+        }
+
+        // Process incoming punches only if it's a freshly registered action
+        if (oppData.action && oppData.action.startsWith('punch') && oppData.lastActive > lastHandledOpponentTimestamp) {
+          lastHandledOpponentTimestamp = oppData.lastActive;
+
+          const myAction = isHost ? p1Action : p2Action;
+          const myStamina = isHost ? p1Stamina : p2Stamina;
+          const myHealth = isHost ? p1Health : p2Health;
+
+          if (myAction === 'dodge') {
+            playPunchSound(); // Swing and miss
+          } else if (myAction === 'block') {
+            playBlockSound();
+            const nextStam = Math.max(0, myStamina - 18);
+            if (isHost) {
+              setP1Stamina(nextStam);
+              updateDoc(docRef, {
+                'p1.energy': nextStam,
+                'p1.lastActive': Date.now()
+              });
+            } else {
+              setP2Stamina(nextStam);
+              updateDoc(docRef, {
+                'p2.energy': nextStam,
+                'p2.lastActive': Date.now()
+              });
             }
           } else {
-            // Guest receives details of P1 (Red)
-            if (data.p1) {
-              setP1Health(data.p1.health);
-              setP1Stamina(data.p1.energy);
-              setP1Action(data.p1.action as PlayerAction);
-            }
-          }
+            // Hit lands
+            playHitSound();
+            addBurst(!isHost);
 
-          // Force synchronize gameOver if opponent hits 0 first on host
-          if (data.status === 'ended' || data.p1?.health <= 0 || data.p2?.health <= 0) {
-            if (data.p1?.health <= 0 && !winner) {
-              triggerMatchWin(p2);
-            } else if (data.p2?.health <= 0 && !winner) {
-              triggerMatchWin(p1);
+            const nextHealth = Math.max(0, myHealth - 10);
+
+            if (isHost) {
+              setP1Health(nextHealth);
+              setP1Action('hit');
+              updateDoc(docRef, {
+                'p1.health': nextHealth,
+                'p1.action': 'hit',
+                'p1.lastActive': Date.now()
+              });
+
+              if (nextHealth === 0) {
+                updateDoc(docRef, { status: 'ended' });
+                triggerMatchWin(p2);
+              }
+              setTimeout(() => {
+                setP1Action('idle');
+                updateDoc(docRef, { 'p1.action': 'idle' });
+              }, 250);
+            } else {
+              setP2Health(nextHealth);
+              setP2Action('hit');
+              updateDoc(docRef, {
+                'p2.health': nextHealth,
+                'p2.action': 'hit',
+                'p2.lastActive': Date.now()
+              });
+
+              if (nextHealth === 0) {
+                updateDoc(docRef, { status: 'ended' });
+                triggerMatchWin(p1);
+              }
+              setTimeout(() => {
+                setP2Action('idle');
+                updateDoc(docRef, { 'p2.action': 'idle' });
+              }, 250);
             }
           }
         }
-      } catch (err) {
-        console.error('Lobby synchronization failed', err);
       }
-    }, 200);
 
-    return () => clearInterval(pollInterval);
-  }, [isOnline, p1Health, p2Health, p1Stamina, p2Stamina, onlineSide, winner]);
+      // Check ended status
+      if (data.status === 'ended' || (data.p1 && data.p1.health <= 0) || (data.p2 && data.p2.health <= 0)) {
+        if (data.p1?.health <= 0 && !winner) {
+          triggerMatchWin(p2);
+        } else if (data.p2?.health <= 0 && !winner) {
+          triggerMatchWin(p1);
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, [isOnline, p1Health, p2Health, p1Stamina, p2Stamina, onlineSide, winner, p1Action, p2Action]);
 
   // Stamina passive replication/recovery ticker
   useEffect(() => {
@@ -304,25 +352,52 @@ export default function BoxingFight({ p1, p2, roomId, onlineSide, onQuit }: Boxi
     }
 
     setP1Action(act);
-    if (isOnline) {
-      localActionBuffer.current = act;
+    const cost = act.startsWith('punch') ? 15 : act === 'dodge' ? 20 : 0;
+    const nextStam = Math.max(0, p1Stamina - cost);
+    setP1Stamina(nextStam);
+
+    if (isOnline && onlineSide === 0) {
+      const docRef = doc(db, 'rooms', roomId!);
+      updateDoc(docRef, {
+        p1: {
+          displayName: p1.name,
+          faces: p1.faces,
+          health: p1Health,
+          energy: nextStam,
+          action: act,
+          lastActive: Date.now()
+        }
+      }).catch(err => console.error("Firestore action write failed:", err));
     }
 
     if (act.startsWith('punch')) {
       playPunchSound();
-      setP1Stamina(prev => Math.max(0, prev - 15));
       // Try hit logic (local offline play immediately, online waits for synchronization)
       if (!isOnline) {
         processFistImpact(0);
       }
       // Return to idle
-      setTimeout(() => setP1Action('idle'), 200);
+      setTimeout(() => {
+        setP1Action('idle');
+        if (isOnline && onlineSide === 0) {
+          updateDoc(doc(db, 'rooms', roomId!), { 'p1.action': 'idle' }).catch(() => {});
+        }
+      }, 200);
     } else if (act === 'dodge') {
-      setP1Stamina(prev => Math.max(0, prev - 20));
-      setTimeout(() => setP1Action('idle'), 220);
+      setTimeout(() => {
+        setP1Action('idle');
+        if (isOnline && onlineSide === 0) {
+          updateDoc(doc(db, 'rooms', roomId!), { 'p1.action': 'idle' }).catch(() => {});
+        }
+      }, 220);
     } else if (act === 'block') {
       // Block is held or triggers simple duration
-      setTimeout(() => setP1Action('idle'), 450);
+      setTimeout(() => {
+        setP1Action('idle');
+        if (isOnline && onlineSide === 0) {
+          updateDoc(doc(db, 'rooms', roomId!), { 'p1.action': 'idle' }).catch(() => {});
+        }
+      }, 450);
     }
   };
 
@@ -333,22 +408,49 @@ export default function BoxingFight({ p1, p2, roomId, onlineSide, onQuit }: Boxi
     if (act === 'dodge' && p2Stamina < 20) return;
 
     setP2Action(act);
-    if (isOnline) {
-      localActionBuffer.current = act;
+    const cost = act.startsWith('punch') ? 15 : act === 'dodge' ? 20 : 0;
+    const nextStam = Math.max(0, p2Stamina - cost);
+    setP2Stamina(nextStam);
+
+    if (isOnline && onlineSide === 1) {
+      const docRef = doc(db, 'rooms', roomId!);
+      updateDoc(docRef, {
+        p2: {
+          displayName: p2.name,
+          faces: p2.faces,
+          health: p2Health,
+          energy: nextStam,
+          action: act,
+          lastActive: Date.now()
+        }
+      }).catch(err => console.error("Firestore action write failed:", err));
     }
 
     if (act.startsWith('punch')) {
       playPunchSound();
-      setP2Stamina(prev => Math.max(0, prev - 15));
       if (!isOnline) {
         processFistImpact(1);
       }
-      setTimeout(() => setP2Action('idle'), 200);
+      setTimeout(() => {
+        setP2Action('idle');
+        if (isOnline && onlineSide === 1) {
+          updateDoc(doc(db, 'rooms', roomId!), { 'p2.action': 'idle' }).catch(() => {});
+        }
+      }, 200);
     } else if (act === 'dodge') {
-      setP2Stamina(prev => Math.max(0, prev - 20));
-      setTimeout(() => setP2Action('idle'), 220);
+      setTimeout(() => {
+        setP2Action('idle');
+        if (isOnline && onlineSide === 1) {
+          updateDoc(doc(db, 'rooms', roomId!), { 'p2.action': 'idle' }).catch(() => {});
+        }
+      }, 220);
     } else if (act === 'block') {
-      setTimeout(() => setP2Action('idle'), 450);
+      setTimeout(() => {
+        setP2Action('idle');
+        if (isOnline && onlineSide === 1) {
+          updateDoc(doc(db, 'rooms', roomId!), { 'p2.action': 'idle' }).catch(() => {});
+        }
+      }, 450);
     }
   };
 

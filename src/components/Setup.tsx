@@ -5,6 +5,8 @@ import { PlayerCustomization } from '../types';
 import CameraCapture from './CameraCapture';
 import { RED_PRESETS, GREEN_PRESETS, BOT_PRESETS, DefaultAvatarPreset } from '../utils/avatars';
 import { playCountdownBeep } from '../utils/audio';
+import { db } from '../lib/firebase';
+import { doc, setDoc, onSnapshot, getDoc, updateDoc } from 'firebase/firestore';
 
 interface SetupProps {
   gameMode: 'boxing_fight' | 'slapping_duel';
@@ -45,57 +47,42 @@ export default function Setup({ gameMode, onlineSlot, onComplete, onBack }: Setu
   const [onlineMessage, setOnlineMessage] = useState<string>('');
   const [onlineError, setOnlineError] = useState<string>('');
 
-  // Clean timer loops
+  // Reactive Firestore state loop for host
   useEffect(() => {
-    let intervalId: any = null;
+    if (!lobbyRoomId || onlineSlot !== 'online_create') return;
     
-    if (lobbyRoomId && onlineSlot === 'online_create') {
-      // Creator polls every 1000ms for Player 2 joining
-      intervalId = setInterval(async () => {
-        try {
-          const res = await fetch(`/api/rooms/${lobbyRoomId}/sync`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              playerIndex: 0,
-              displayName: p1Name,
-              action: 'idle',
-              faces: p1Faces.normal ? p1Faces : null
-            })
-          });
+    const docRef = doc(db, 'rooms', lobbyRoomId);
+    const unsubscribe = onSnapshot(docRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        if (data.p2) {
+          playCountdownBeep(true);
+          
+          // Map opponent info
+          const opponent: PlayerCustomization = {
+            name: data.p2.displayName || 'Fighter Green',
+            color: 'green',
+            avatarType: data.p2.faces ? 'camera' : 'default',
+            faces: data.p2.faces || { normal: null, attack: null, hit: null }
+          };
 
-          if (res.ok) {
-            const data = await res.json();
-            if (data.p2) {
-              clearInterval(intervalId);
-              playCountdownBeep(true);
-              
-              // Map opponent info
-              const opponent: PlayerCustomization = {
-                name: data.p2.displayName || 'Fighter Green',
-                color: 'green',
-                avatarType: data.p2.faces ? 'camera' : 'default',
-                faces: data.p2.faces || { normal: null, attack: null, hit: null }
-              };
+          const self: PlayerCustomization = {
+            name: p1Name,
+            color: 'red',
+            avatarType: p1Faces.normal ? 'camera' : 'default',
+            faces: p1Faces
+          };
 
-              const self: PlayerCustomization = {
-                name: p1Name,
-                color: 'red',
-                avatarType: p1Faces.normal ? 'camera' : 'default',
-                faces: p1Faces
-              };
-
-              onComplete(self, opponent, lobbyRoomId, 0);
-            }
-          }
-        } catch (e) {
-          console.error('Failed sync polling creator', e);
+          unsubscribe();
+          onComplete(self, opponent, lobbyRoomId, 0);
         }
-      }, 1200);
-    }
+      }
+    }, (error) => {
+      console.error("Firestore onSnapshot error:", error);
+    });
 
     return () => {
-      if (intervalId) clearInterval(intervalId);
+      unsubscribe();
     };
   }, [lobbyRoomId, p1Name, p1Faces, onlineSlot]);
 
@@ -117,40 +104,48 @@ export default function Setup({ gameMode, onlineSlot, onComplete, onBack }: Setu
       return;
     }
 
-    // Creating Online Room Match
+    // Creating Online Room Match in Firestore
     if (onlineSlot === 'online_create') {
       setIsCreatingLobby(true);
       setOnlineError('');
       
       try {
+        // Generate random unique 4-digit ID
+        const generatedId = Math.floor(1000 + Math.random() * 9000).toString();
         const initFaces = p1Faces.normal ? p1Faces : null;
-        const res = await fetch('/api/rooms', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            displayName: p1Name,
+
+        const roomDocRef = doc(db, 'rooms', generatedId);
+        
+        await setDoc(roomDocRef, {
+          id: generatedId,
+          gameMode: gameMode,
+          status: 'lobby',
+          p1: {
+            displayName: p1Name || 'Fighter Red',
+            health: gameMode === 'boxing_fight' ? 100 : 5,
+            energy: gameMode === 'boxing_fight' ? 100 : 1, // Attacker role starts with 1 for Host
+            action: 'idle',
+            score: 0,
             faces: initFaces,
-            gameMode: gameMode
-          })
+            lastHitType: null,
+            lastActive: Date.now()
+          },
+          p2: null,
+          updatedAt: new Date().toISOString()
         });
 
-        if (res.ok) {
-          const data = await res.json();
-          setLobbyRoomId(data.roomId);
-          setOnlineMessage(`Room ${data.roomId} loaded. Hold tight...`);
-        } else {
-          const errData = await res.json();
-          setOnlineError(errData.error || 'Server room setup mismatch.');
-        }
-      } catch (err) {
-        setOnlineError('Server unreachable. Play Local Mode instead!');
+        setLobbyRoomId(generatedId);
+        setOnlineMessage(`Room ${generatedId} loaded. Hold tight...`);
+      } catch (err: any) {
+        console.error('Room create error', err);
+        setOnlineError('Firebase unavailable. Choose Local instead!');
       } finally {
         setIsCreatingLobby(false);
       }
       return;
     }
 
-    // Joining Existing Room Match
+    // Joining Existing Room Match inside Firestore
     if (onlineSlot === 'online_join') {
       if (!enteredRoomId.trim()) {
         setOnlineError('Please input a valid 4-digit Room code.');
@@ -162,57 +157,59 @@ export default function Setup({ gameMode, onlineSlot, onComplete, onBack }: Setu
       
       try {
         const joinFaces = p1Faces.normal ? p1Faces : null;
-        const res = await fetch('/api/rooms/join', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            roomId: enteredRoomId.trim(),
-            displayName: p1Name,
-            faces: joinFaces
-          })
+        const roomDocRef = doc(db, 'rooms', enteredRoomId.trim());
+        const snapshot = await getDoc(roomDocRef);
+
+        if (!snapshot.exists()) {
+          setOnlineError('Fighter room not found. Double-check your 4-digit code.');
+          setIsJoiningLobby(false);
+          return;
+        }
+
+        const data = snapshot.data();
+        if (data.status === 'playing' || data.p2) {
+          setOnlineError('Room is already full! Max 2 players allowed.');
+          setIsJoiningLobby(false);
+          return;
+        }
+
+        const guestData = {
+          displayName: p1Name || 'Fighter Green',
+          health: gameMode === 'boxing_fight' ? 100 : 5,
+          energy: gameMode === 'boxing_fight' ? 100 : 0, // Guest is defender first (energy 0)
+          action: 'idle',
+          score: 0,
+          faces: joinFaces,
+          lastHitType: null,
+          lastActive: Date.now()
+        };
+
+        // Write guest details to P2
+        await updateDoc(roomDocRef, {
+          p2: guestData,
+          status: 'playing',
+          updatedAt: new Date().toISOString()
         });
 
-        if (res.ok) {
-          const data = await res.json();
-          setOnlineMessage(data.message || 'Connecting to battle room...');
+        setOnlineMessage('Matched with Red Fighter! Preparing the arena...');
 
-          // Initial pull to fetch Player 1 details
-          const syncRes = await fetch(`/api/rooms/${enteredRoomId.trim()}/sync`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              playerIndex: 1,
-              displayName: p1Name,
-              faces: joinFaces
-            })
-          });
+        const opponent: PlayerCustomization = {
+          name: data.p1?.displayName || 'Fighter Red',
+          color: 'red',
+          avatarType: data.p1?.faces ? 'camera' : 'default',
+          faces: data.p1?.faces || { normal: null, attack: null, hit: null }
+        };
 
-          if (syncRes.ok) {
-            const syncData = await syncRes.json();
-            
-            const opponent: PlayerCustomization = {
-              name: syncData.p1?.displayName || 'Fighter Red',
-              color: 'red',
-              avatarType: syncData.p1?.faces ? 'camera' : 'default',
-              faces: syncData.p1?.faces || { normal: null, attack: null, hit: null }
-            };
+        const self: PlayerCustomization = {
+          name: p1Name,
+          color: 'green',
+          avatarType: p1Faces.normal ? 'camera' : 'default',
+          faces: p1Faces
+        };
 
-            const self: PlayerCustomization = {
-              name: p1Name,
-              color: 'green', // Joined side is green
-              avatarType: p1Faces.normal ? 'camera' : 'default',
-              faces: p1Faces
-            };
-
-            onComplete(opponent, self, enteredRoomId.trim(), 1);
-          } else {
-            setOnlineError('Room synchronization failed.');
-          }
-        } else {
-          const errData = await res.json();
-          setOnlineError(errData.error || 'Error joining Room code.');
-        }
-      } catch (err) {
+        onComplete(opponent, self, enteredRoomId.trim(), 1);
+      } catch (err: any) {
+        console.error('Room join error', err);
         setOnlineError('Online connection failed.');
       } finally {
         setIsJoiningLobby(false);
