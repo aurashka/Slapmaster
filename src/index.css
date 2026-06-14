@@ -1,0 +1,78 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700;900&family=JetBrains+Mono:wght@400;700;800&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+/* Custom retro grid pattern background */
+.retro-grid {
+  background-size: 40px 40px;
+  background-image: linear-gradient(to right, rgba(244, 63, 94, 0.05) 1px, transparent 1px),
+                    linear-gradient(to bottom, rgba(244, 63, 94, 0.05) 1px, transparent 1px);
+}
+
+.retro-grid-green {
+  background-size: 40px 40px;
+  background-image: linear-gradient(to right, rgba(16, 185, 129, 0.05) 1px, transparent 1px),
+                    linear-gradient(to bottom, rgba(16, 185, 129, 0.05) 1px, transparent 1px);
+}
+
+.cyber-grid {
+  background-size: 20px 20px;
+  background-image: linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+}
+
+/* Neon glow classes */
+.glow-red {
+  box-shadow: 0 0 15px rgba(239, 68, 68, 0.4);
+}
+
+.glow-green {
+  box-shadow: 0 0 15px rgba(16, 185, 129, 0.4);
+}
+
+.text-glow-red {
+  text-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
+}
+
+.text-glow-green {
+  text-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+}
+
+/* Custom scanlines retro arcade filter */
+.scanlines {
+  position: relative;
+  overflow: hidden;
+}
+
+.scanlines::before {
+  content: " ";
+  display: block;
+  position: absolute;
+  top: 0; left: 0; bottom: 0; right: 0;
+  background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+  z-index: 10;
+  background-size: 100% 4px, 6px 100%;
+  pointer-events: none;
+}
+
+/* Standard animation frames */
+@keyframes shake {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  20% { transform: translate(-8px, 5px) rotate(-3deg); }
+  40% { transform: translate(8px, -5px) rotate(3deg); }
+  60% { transform: translate(-5px, -3px) rotate(-1deg); }
+  80% { transform: translate(5px, 3px) rotate(1deg); }
+}
+
+.animate-head-shake {
+  animation: shake 0.25s ease-in-out infinite;
+}
+
+/* Custom phone frame borders styling */
+.phone-frame-gradient {
+  background: linear-gradient(145deg, #1e1b4b, #03001e);
+}
