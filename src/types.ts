@@ -10,6 +10,7 @@ export interface PlayerCustomization {
     attack: string | null;
     hit: string | null;
   };
+  imageUrl?: string;
 }
 
 export type PlayerAction = 'idle' | 'punch_left' | 'punch_right' | 'block' | 'hit' | 'dodge';

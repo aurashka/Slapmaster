@@ -6,7 +6,7 @@ import CameraCapture from './CameraCapture';
 import { RED_PRESETS, GREEN_PRESETS, BOT_PRESETS, DefaultAvatarPreset } from '../utils/avatars';
 import { playCountdownBeep } from '../utils/audio';
 import { db } from '../lib/firebase';
-import { doc, setDoc, onSnapshot, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, setDoc, onSnapshot, getDoc, updateDoc, collection, query, where, limit } from 'firebase/firestore';
 
 interface SetupProps {
   gameMode: 'boxing_fight' | 'slapping_duel';
@@ -22,18 +22,42 @@ export default function Setup({ gameMode, onlineSlot, onComplete, onBack }: Setu
   const [currentStep, setCurrentStep] = useState<0 | 1>(0);
   const [showCamera, setShowCamera] = useState<boolean>(false);
   
-  // Customization states
-  const [p1Name, setP1Name] = useState<string>('Fighter Red');
-  const [p2Name, setP2Name] = useState<string>('Fighter Green');
+  // Customization states loaded from LocalStorage
+  const [p1Name, setP1Name] = useState<string>(() => localStorage.getItem('creadit_p1Name') || 'Fighter Red');
+  const [p2Name, setP2Name] = useState<string>(() => localStorage.getItem('creadit_p2Name') || 'Fighter Green');
   
-  const [p1SelectedPreset, setP1SelectedPreset] = useState<DefaultAvatarPreset>(RED_PRESETS[0]);
-  const [p2SelectedPreset, setP2SelectedPreset] = useState<DefaultAvatarPreset>(GREEN_PRESETS[0]);
-  
-  const [p1Faces, setP1Faces] = useState<{ normal: string | null; attack: string | null; hit: string | null }>({
-    normal: null, attack: null, hit: null
+  const [p1SelectedPreset, setP1SelectedPreset] = useState<DefaultAvatarPreset>(() => {
+    try {
+      const saved = localStorage.getItem('creadit_p1SelectedPreset');
+      return saved ? JSON.parse(saved) : RED_PRESETS[0];
+    } catch {
+      return RED_PRESETS[0];
+    }
   });
-  const [p2Faces, setP2Faces] = useState<{ normal: string | null; attack: string | null; hit: string | null }>({
-    normal: null, attack: null, hit: null
+  const [p2SelectedPreset, setP2SelectedPreset] = useState<DefaultAvatarPreset>(() => {
+    try {
+      const saved = localStorage.getItem('creadit_p2SelectedPreset');
+      return saved ? JSON.parse(saved) : GREEN_PRESETS[0];
+    } catch {
+      return GREEN_PRESETS[0];
+    }
+  });
+  
+  const [p1Faces, setP1Faces] = useState<{ normal: string | null; attack: string | null; hit: string | null }>(() => {
+    try {
+      const saved = localStorage.getItem('creadit_p1Faces');
+      return saved ? JSON.parse(saved) : { normal: null, attack: null, hit: null };
+    } catch {
+      return { normal: null, attack: null, hit: null };
+    }
+  });
+  const [p2Faces, setP2Faces] = useState<{ normal: string | null; attack: string | null; hit: string | null }>(() => {
+    try {
+      const saved = localStorage.getItem('creadit_p2Faces');
+      return saved ? JSON.parse(saved) : { normal: null, attack: null, hit: null };
+    } catch {
+      return { normal: null, attack: null, hit: null };
+    }
   });
 
   // AI Boss preset selector (only if VS AI)
@@ -46,6 +70,52 @@ export default function Setup({ gameMode, onlineSlot, onComplete, onBack }: Setu
   const [isJoiningLobby, setIsJoiningLobby] = useState<boolean>(false);
   const [onlineMessage, setOnlineMessage] = useState<string>('');
   const [onlineError, setOnlineError] = useState<string>('');
+  const [activeRooms, setActiveRooms] = useState<any[]>([]);
+
+  // Automatically persist customizations to localStorage upon updates
+  useEffect(() => {
+    localStorage.setItem('creadit_p1Name', p1Name);
+  }, [p1Name]);
+
+  useEffect(() => {
+    localStorage.setItem('creadit_p2Name', p2Name);
+  }, [p2Name]);
+
+  useEffect(() => {
+    localStorage.setItem('creadit_p1SelectedPreset', JSON.stringify(p1SelectedPreset));
+  }, [p1SelectedPreset]);
+
+  useEffect(() => {
+    localStorage.setItem('creadit_p2SelectedPreset', JSON.stringify(p2SelectedPreset));
+  }, [p2SelectedPreset]);
+
+  useEffect(() => {
+    localStorage.setItem('creadit_p1Faces', JSON.stringify(p1Faces));
+  }, [p1Faces]);
+
+  useEffect(() => {
+    localStorage.setItem('creadit_p2Faces', JSON.stringify(p2Faces));
+  }, [p2Faces]);
+
+  // Read real-time active lobbies currently looking for opponents
+  useEffect(() => {
+    if (onlineSlot !== 'online_join') return;
+    try {
+      const q = query(collection(db, 'rooms'), where('status', '==', 'lobby'), limit(15));
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const roomsList: any[] = [];
+        snapshot.forEach((docSnap) => {
+          roomsList.push({ id: docSnap.id, ...docSnap.data() });
+        });
+        setActiveRooms(roomsList);
+      }, (err) => {
+        console.error("Firestore active rooms listing failed:", err);
+      });
+      return () => unsubscribe();
+    } catch (err) {
+      console.error("Setup active lobby watcher error:", err);
+    }
+  }, [onlineSlot]);
 
   // Reactive Firestore state loop for host
   useEffect(() => {
@@ -230,7 +300,8 @@ export default function Setup({ gameMode, onlineSlot, onComplete, onBack }: Setu
         name: selectedAIBoss.name,
         color: 'green',
         avatarType: 'default',
-        faces: { normal: null, attack: null, hit: null }
+        faces: { normal: null, attack: null, hit: null },
+        imageUrl: selectedAIBoss.imageUrl
       };
 
       onComplete(p1, aiFighter);
@@ -371,19 +442,73 @@ export default function Setup({ gameMode, onlineSlot, onComplete, onBack }: Setu
 
             {/* Online Room input if code join *only* */}
             {onlineSlot === 'online_join' && (
-              <div className="space-y-1.5 p-3 rounded-xl bg-orange-950/20 border border-orange-900/40">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-orange-400 flex items-center gap-1">
-                  <Hash className="w-3.5 h-3.5 text-orange-500" />
-                  <span>Enter 4-Digit Joining Code</span>
-                </label>
-                <input
-                  type="text"
-                  maxLength={4}
-                  value={enteredRoomId}
-                  onChange={(e) => setEnteredRoomId(e.target.value.replace(/\D/g, ''))}
-                  placeholder="e.g. 5240"
-                  className="w-full text-center py-2 px-3 rounded-lg bg-slate-950 border border-orange-900/50 focus:border-orange-500 outline-none text-lg font-black tracking-widest text-orange-300 font-mono shadow-inner"
-                />
+              <div className="space-y-3">
+                <div className="space-y-1.5 p-3 rounded-xl bg-orange-950/20 border border-orange-900/40">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-orange-400 flex items-center gap-1">
+                    <Hash className="w-3.5 h-3.5 text-orange-500" />
+                    <span>Enter 4-Digit Joining Code</span>
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={4}
+                    value={enteredRoomId}
+                    onChange={(e) => setEnteredRoomId(e.target.value.replace(/\D/g, ''))}
+                    placeholder="e.g. 5240"
+                    className="w-full text-center py-2 px-3 rounded-lg bg-slate-950 border border-orange-900/50 focus:border-orange-500 outline-none text-lg font-black tracking-widest text-orange-300 font-mono shadow-inner"
+                  />
+                </div>
+
+                {/* Active lobbies ticker view */}
+                <div className="space-y-2 p-3 rounded-xl bg-slate-900/80 border border-slate-800">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping inline-block" />
+                      Active Match Lobbies
+                    </span>
+                    <span className="text-[8px] text-slate-500 uppercase tracking-widest font-mono">Live list</span>
+                  </div>
+
+                  {activeRooms.filter(r => r.status === 'lobby').length === 0 ? (
+                    <p className="text-[10px] text-slate-500 text-center py-3">
+                      No active lobbies waiting. Ask a friend to host, or click Host Match!
+                    </p>
+                  ) : (
+                    <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                      {activeRooms.filter(r => r.status === 'lobby').map((room) => (
+                        <button
+                          key={room.id}
+                          type="button"
+                          onClick={() => {
+                            setEnteredRoomId(room.id);
+                            playCountdownBeep(true);
+                          }}
+                          className={`w-full p-2 bg-slate-950 rounded-lg border text-left flex items-center justify-between transition-all ${
+                            enteredRoomId === room.id
+                              ? 'border-emerald-500 bg-emerald-950/20'
+                              : 'border-slate-800 hover:border-slate-700'
+                          }`}
+                        >
+                          <div>
+                            <span className="text-[11px] font-black font-mono text-slate-200">
+                              #ROOM {room.id}
+                            </span>
+                            <span className="text-[9px] text-slate-450 block font-bold capitalize">
+                              🎮 {room.gameMode === 'boxing_fight' ? 'Boxing Fight' : 'Slap Duel'}
+                            </span>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-[10px] font-bold text-emerald-450 block truncate max-w-[100px]">
+                              👤 {room.p1?.displayName || 'Host'}
+                            </span>
+                            <span className="text-[8px] text-indigo-400 font-bold block uppercase tracking-wide">
+                              Tap to Fill
+                            </span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 

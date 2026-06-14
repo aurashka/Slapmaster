@@ -39,6 +39,9 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
   const [winner, setWinner] = useState<PlayerCustomization | null>(null);
   const [countdown, setCountdown] = useState<number | null>(3);
 
+  // Ticker and combat logs
+  const [combatLogs, setCombatLogs] = useState<{ id: string; text: string; color: string }[]>([]);
+
   // Timing windows for dodging and networking
   const slapTimerRef = useRef<any>(null);
   const stateActive = countdown === null && !winner;
@@ -50,6 +53,20 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
   const lobbyLastUpdate = useRef<number>(0);
 
   const timestampNow = () => Date.now();
+
+  const addLog = (text: string, type: 'hit' | 'dodge' | 'block' | 'action' | 'penalty') => {
+    let color = 'text-slate-450';
+    if (type === 'hit') color = 'text-rose-500 font-extrabold';
+    else if (type === 'dodge') color = 'text-orange-400 font-bold';
+    else if (type === 'block') color = 'text-sky-400 font-bold';
+    else if (type === 'penalty') color = 'text-yellow-500 font-semibold';
+    else if (type === 'action') color = 'text-emerald-400 font-bold';
+
+    setCombatLogs(prev => [
+      { id: Math.random().toString(), text, color },
+      ...prev.slice(0, 4)
+    ]);
+  };
 
   // Match Countdown on mount
   useEffect(() => {
@@ -64,6 +81,7 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
         // Randomly choose first attacker
         setAttackerIndex(Math.random() < 0.5 ? 0 : 1);
         setMessage('BATTLE COMMENCED!');
+        addLog("🔔 SLAPPING DUEL STARTED!", "penalty");
       }, 800);
     }
     return () => clearTimeout(timer);
@@ -73,20 +91,38 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
   useEffect(() => {
     if (!isOnline) {
       // Offline local AI routine if opponent is a Bot
-      if (onlineSide === undefined && p2.name.includes('Bot') || p2.name.includes('Giga')) {
+      const isOpponentAI = onlineSide === undefined && (p2.name.includes('Bot') || p2.name.includes('Giga') || p2.name.includes('Slayer') || p2.name.includes('Tyson') || p2.name.includes('Phantom') || p2.name.includes('Rocky'));
+      if (isOpponentAI) {
+        const isHard = p2.name.includes('Giga') || p2.name.includes('Slayer') || p2.name.includes('Tyson');
+        
         const aiInterval = setInterval(() => {
           if (!stateActiveRef.current) return;
 
-          // AI Attacking loop
+          // AI Attacking loop (smarter and faster combo triggers)
           if (attackerIndex === 1) {
             const rand = Math.random();
-            if (rand < 0.18) {
-              executeAISlapAction();
-            } else if (rand < 0.32) {
-              executeAIFakeAction();
+            if (isHard) {
+              if (rand < 0.28) {
+                executeAIFakeAction();
+                // Baited combo slap follow-up shortly after fake
+                setTimeout(() => {
+                  if (stateActiveRef.current && attackerIndex === 1) {
+                    executeAISlapAction();
+                  }
+                }, 380);
+              } else if (rand < 0.58) {
+                executeAISlapAction();
+              }
+            } else {
+              // Easy AI
+              if (rand < 0.18) {
+                executeAISlapAction();
+              } else if (rand < 0.32) {
+                executeAIFakeAction();
+              }
             }
           }
-        }, 1200);
+        }, isHard ? 650 : 1100);
 
         return () => clearInterval(aiInterval);
       }
@@ -118,6 +154,8 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
           lastHandledOpponentTimestamp = oppData.lastActive;
 
           const oppIndex = isHost ? 1 : 0;
+          addLog(`⚡ ${isHost ? p2.name : p1.name} triggered ${oppData.action.toUpperCase()}!`, 'action');
+
           if (oppData.action === 'slap') {
             opponentsSlap(oppIndex, isHost);
           } else if (oppData.action === 'fake') {
@@ -166,6 +204,7 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
     if (oppSlot === 1) {
       setP2State('slapping');
       playPunchSound();
+      addLog(`👋 ${p2.name} slapped!`, 'action');
       
       // Hit evaluation window: did player 1 dodge in time?
       slapTimerRef.current = setTimeout(() => {
@@ -175,23 +214,26 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
           setP1State('idle');
           playPunchSound(); // missed swipe
           setMessage('DODGED! Roles swapped.');
+          addLog(`💨 ${p1.name} dodged ${p2.name}! Role swapped!`, 'dodge');
           setAttackerIndex(0);
         } else {
           // HIT! Attacker retains role
           playSlapSound();
           setP1State('hit');
+          addLog(`💥 ${p2.name} slapped ${p1.name} hard!`, 'hit');
           setP1Hearts(prev => {
             const next = Math.max(0, prev - 1);
             if (next === 0) triggerMatchWin(p2);
             return next;
           });
-          setMessage('SLAP LANDED! Red hits!');
+          setMessage('SLAP LANDED! Green hits!');
           setTimeout(() => setP1State('idle'), 400);
         }
       }, 230);
     } else {
       setP1State('slapping');
       playPunchSound();
+      addLog(`👋 ${p1.name} slapped!`, 'action');
       
       slapTimerRef.current = setTimeout(() => {
         setP1State('idle');
@@ -199,16 +241,18 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
           setP2State('idle');
           playPunchSound();
           setMessage('DODGED! Roles swapped.');
+          addLog(`💨 ${p2.name} dodged ${p1.name}! Role swapped!`, 'dodge');
           setAttackerIndex(1);
         } else {
           playSlapSound();
           setP2State('hit');
+          addLog(`💥 ${p1.name} slapped ${p2.name} hard!`, 'hit');
           setP2Hearts(prev => {
             const next = Math.max(0, prev - 1);
             if (next === 0) triggerMatchWin(p1);
             return next;
           });
-          setMessage('SLAP LANDED! Green hits!');
+          setMessage('SLAP LANDED! Red hits!');
           setTimeout(() => setP2State('idle'), 400);
         }
       }, 230);
@@ -219,6 +263,7 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
     if (oppSlot === 1) {
       setP2State('faking');
       playPunchSound();
+      addLog(`👀 ${p2.name} made a FAKE slap bait!`, 'action');
       setTimeout(() => {
         setP2State('idle');
         // Check if player Red fell for the fake!
@@ -227,6 +272,7 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
           playHitSound();
           setP1Penalties(prev => {
             const next = prev + 1;
+            addLog(`⚠️ ${p1.name} baited! Panic penalties: ${next}/3`, 'penalty');
             if (next >= 3) {
               // Free slap penalty trigger
               setFreeSlapDeal(1); // Player 2 gets free slapped!
@@ -236,12 +282,13 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
             return next;
           });
         } else {
-          setMessage('Calm read! Green faked.');
+          setMessage('Calm read! Red stood still.');
         }
       }, 220);
     } else {
       setP1State('faking');
       playPunchSound();
+      addLog(`👀 ${p1.name} made a FAKE slap bait!`, 'action');
       setTimeout(() => {
         setP1State('idle');
         if (p2State === 'dodging') {
@@ -249,6 +296,7 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
           playHitSound();
           setP2Penalties(prev => {
             const next = prev + 1;
+            addLog(`⚠️ ${p2.name} baited! Panic penalties: ${next}/3`, 'penalty');
             if (next >= 3) {
               setFreeSlapDeal(0);
               return 0;
@@ -257,7 +305,7 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
             return next;
           });
         } else {
-          setMessage('Calm read! Red faked.');
+          setMessage('Calm read! Green stood still.');
         }
       }, 220);
     }
@@ -278,6 +326,7 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
     setMessage('PENALTY METED! FREE SMACK.');
     if (inflictorIdx === 0) {
       setP2State('hit');
+      addLog(`💥 FREE SMACK landed on ${p2.name}!`, 'hit');
       setP2Hearts(prev => {
         const next = Math.max(0, prev - 1);
         if (next === 0) triggerMatchWin(p1);
@@ -286,6 +335,7 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
       setTimeout(() => setP2State('idle'), 400);
     } else {
       setP1State('hit');
+      addLog(`💥 FREE SMACK landed on ${p1.name}!`, 'hit');
       setP1Hearts(prev => {
         const next = Math.max(0, prev - 1);
         if (next === 0) triggerMatchWin(p2);
@@ -297,6 +347,7 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
 
   const triggerMatchWin = (crownWinner: PlayerCustomization) => {
     setWinner(crownWinner);
+    addLog(`🏆 CHAMPION CROWNED: ${crownWinner.name}!`, 'penalty');
     if ((onlineSide !== undefined && onlineSide === 0 && crownWinner.color === 'red') || 
         (onlineSide !== undefined && onlineSide === 1 && crownWinner.color === 'green') ||
         (onlineSide === undefined && crownWinner.color === 'red')) {
@@ -350,6 +401,22 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
     if (playerIdx === 0) {
       setP1State('slapping');
       playPunchSound();
+      addLog(`👋 ${p1.name} initiated slap!`, 'action');
+
+      // AI reaction triggers as defender if VS AI
+      const opponentIsBot = onlineSide === undefined && (p2.name.includes('Bot') || p2.name.includes('Giga') || p2.name.includes('Slayer') || p2.name.includes('Tyson') || p2.name.includes('Phantom') || p2.name.includes('Rocky'));
+      if (opponentIsBot && p2State === 'idle') {
+        const isHard = p2.name.includes('Giga') || p2.name.includes('Slayer') || p2.name.includes('Tyson');
+        const reactChance = isHard ? 0.75 : 0.40; // 75% on hard to dodge slap correctly!
+        if (Math.random() < reactChance) {
+          setTimeout(() => {
+            if (stateActiveRef.current && attackerIndex === 0) {
+              setP2State('dodging');
+              setTimeout(() => setP2State('idle'), 450);
+            }
+          }, isHard ? 60 : 130);
+        }
+      }
       
       // Slap lands in 200ms
       slapTimerRef.current = setTimeout(() => {
@@ -360,11 +427,13 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
           setP2State('idle');
           playPunchSound(); // miss swing
           setMessage('DODGED! Roles swapped.');
+          addLog(`💨 ${p2.name} dodged ${p1.name}! Roles swapped!`, 'dodge');
           setAttackerIndex(1); // Swap!
         } else {
           // Landed slap
           playSlapSound();
           setP2State('hit');
+          addLog(`💥 ${p1.name} hit ${p2.name}!`, 'hit');
           setP2Hearts(prev => {
             const next = Math.max(0, prev - 1);
             if (next === 0) triggerMatchWin(p1);
@@ -377,6 +446,7 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
     } else {
       setP2State('slapping');
       playPunchSound();
+      addLog(`👋 ${p2.name} initiated slap!`, 'action');
 
       slapTimerRef.current = setTimeout(() => {
         setP2State('idle');
@@ -385,10 +455,12 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
           setP1State('idle');
           playPunchSound();
           setMessage('DODGED! Roles swapped.');
+          addLog(`💨 ${p1.name} dodged ${p2.name}! Roles swapped!`, 'dodge');
           setAttackerIndex(0);
         } else {
           playSlapSound();
           setP1State('hit');
+          addLog(`💥 ${p2.name} hit ${p1.name}!`, 'hit');
           setP1Hearts(prev => {
             const next = Math.max(0, prev - 1);
             if (next === 0) triggerMatchWin(p2);
@@ -422,6 +494,23 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
     if (playerIdx === 0) {
       setP1State('faking');
       playPunchSound();
+      addLog(`👀 ${p1.name} made a faked jab!`, 'action');
+
+      // AI reaction triggers as defender if VS AI
+      const opponentIsBot = onlineSide === undefined && (p2.name.includes('Bot') || p2.name.includes('Giga') || p2.name.includes('Slayer') || p2.name.includes('Tyson') || p2.name.includes('Phantom') || p2.name.includes('Rocky'));
+      if (opponentIsBot && p2State === 'idle') {
+        const isHard = p2.name.includes('Giga') || p2.name.includes('Slayer') || p2.name.includes('Tyson');
+        const baitChance = isHard ? 0.22 : 0.50; // hard gets baited fewer times!
+        if (Math.random() < baitChance) {
+          setTimeout(() => {
+            if (stateActiveRef.current && attackerIndex === 0) {
+              setP2State('dodging');
+              setTimeout(() => setP2State('idle'), 450);
+            }
+          }, 80);
+        }
+      }
+
       setTimeout(() => {
         setP1State('idle');
         if (p2State === 'dodging') {
@@ -429,6 +518,7 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
           playHitSound(); // Alert clang
           setP2Penalties(prev => {
             const next = prev + 1;
+            addLog(`⚠️ ${p2.name} baited by fake! Penalties: ${next}/3`, 'penalty');
             if (next >= 3) {
               setFreeSlapDeal(0);
               return 0;
@@ -443,6 +533,8 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
     } else {
       setP2State('faking');
       playPunchSound();
+      addLog(`👀 ${p2.name} faked slap!`, 'action');
+
       setTimeout(() => {
         setP2State('idle');
         if (p1State === 'dodging') {
@@ -450,6 +542,7 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
           playHitSound();
           setP1Penalties(prev => {
             const next = prev + 1;
+            addLog(`⚠️ ${p1.name} baited by fake! Penalties: ${next}/3`, 'penalty');
             if (next >= 3) {
               setFreeSlapDeal(1);
               return 0;
@@ -484,6 +577,7 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
 
     if (playerIdx === 0) {
       setP1State('dodging');
+      addLog(`💨 ${p1.name} pulled back!`, 'dodge');
       setTimeout(() => {
         setP1State('idle');
         if (isOnline && onlineSide === 0) {
@@ -492,6 +586,7 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
       }, 450);
     } else {
       setP2State('dodging');
+      addLog(`💨 ${p2.name} pulled back!`, 'dodge');
       setTimeout(() => {
         setP2State('idle');
         if (isOnline && onlineSide === 1) {
@@ -502,6 +597,20 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
   };
 
   const renderHeadAvatar = (fighter: PlayerCustomization, state: string) => {
+    if (fighter.imageUrl) {
+      return (
+        <div className="relative w-full h-full">
+          <img src={fighter.imageUrl} alt="AI Fighter Portrait" className={`w-full h-full object-cover transition-all ${state === 'hit' ? 'brightness-50 saturate-150 border-2 border-red-500 animate-pulse' : ''}`} />
+          {state === 'dodging' && (
+            <div className="absolute inset-0 bg-teal-500/30 flex items-center justify-center text-xs">💨</div>
+          )}
+          {state === 'slapping' && (
+            <div className="absolute inset-x-0 bottom-0 bg-emerald-600/30 text-[8px] font-mono leading-tight font-extrabold text-white text-center">HIT</div>
+          )}
+        </div>
+      );
+    }
+
     if (fighter.avatarType === 'camera' && fighter.faces.normal) {
       let src = fighter.faces.normal;
       if ((state === 'slapping' || state === 'faking') && fighter.faces.attack) {
@@ -530,50 +639,96 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
     setP2State('idle');
     setWinner(null);
     setCountdown(3);
+    setCombatLogs([]);
     setMessage('MATCH READY!');
+    addLog("🔔 REMATCH REMBRANDT - ROUND 1", "penalty");
   };
 
   // Determine active view states
   const showActivePlayerControls = onlineSide === undefined || onlineSide === 0;
   const showOpponentPlayerControls = onlineSide === undefined || onlineSide === 1;
+  const isLocalSamePhone = !isOnline && onlineSide === undefined;
 
   return (
-    <div className="flex flex-col h-full w-full bg-slate-950 text-white font-sans overflow-hidden relative select-none">
+    <div className="flex flex-col h-full w-full bg-slate-950 text-white font-sans overflow-hidden relative select-none justify-between">
       
-      {/* HUD controls overlays */}
-      <div className="absolute top-2 left-2 right-2 flex justify-between items-center z-30 pointer-events-none">
-        <button
-          onClick={onQuit}
-          id="btn-quit-match-overlay"
-          className="p-1 px-2.5 rounded-lg bg-black/60 border border-slate-905 pointer-events-auto text-[9px] font-bold text-slate-400 hover:text-white uppercase tracking-wider"
-        >
-          Quit
-        </button>
-        {isOnline && (
-          <span className="px-2 py-0.5 rounded bg-emerald-950 border border-emerald-850 text-emerald-400 font-mono text-[9px] uppercase tracking-widest font-bold">
-            ROOM: {roomId}
-          </span>
-        )}
-        {!isOnline && onlineSide === undefined && (
-          <button
-            onClick={() => setRotateTopControls(!rotateTopControls)}
-            id="btn-toggle-top-rotate-slap"
-            className="p-1.5 rounded-lg bg-black/60 border border-slate-905 pointer-events-auto text-[9px] uppercase tracking-wider text-slate-400 hover:text-white font-bold flex items-center gap-1"
-          >
-            <RefreshCw className="w-3 h-3" />
-            <span>Face to Face: {rotateTopControls ? 'ON' : 'OFF'}</span>
-          </button>
-        )}
-      </div>
+      {/* 1. TOP CONTROL BAR FOR SAME PHONE LOCAL - ROTATED 180 */}
+      {isLocalSamePhone && (
+        <div className={`p-2 bg-slate-950 border-b border-indigo-950/40 flex items-center justify-center shrink-0 z-20 ${
+          rotateTopControls ? 'transform rotate-180' : ''
+        }`}>
+          <div className="grid grid-cols-3 gap-1.5 w-full max-w-sm">
+            {attackerIndex === 1 ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => tapFake(1)}
+                  disabled={countdown !== null || winner !== null}
+                  className="bg-yellow-950/40 hover:bg-yellow-900/10 border border-yellow-900/50 text-yellow-405 font-black text-[9px] py-3.5 uppercase rounded-xl flex flex-col items-center justify-center px-1"
+                >
+                  <span>SLAP FAKE</span>
+                  <span className="text-[7px] font-mono opacity-50">BAIT DODGER</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => tapSlap(1)}
+                  disabled={countdown !== null || winner !== null}
+                  className="col-span-2 bg-gradient-to-r from-emerald-600 to-teal-650 text-white font-black text-xs py-3.5 uppercase rounded-xl flex flex-col items-center justify-center"
+                >
+                  <span className="text-xs">👋 SLAP DUEL 👋</span>
+                  <span className="text-[7px] font-mono opacity-80">TAP LAND HIT</span>
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => tapDodge(1)}
+                disabled={countdown !== null || winner !== null}
+                className="col-span-3 bg-indigo-950 active:bg-indigo-900 border border-indigo-850 text-indigo-400 font-extrabold text-sm py-3.5 uppercase rounded-xl flex flex-col items-center justify-center"
+              >
+                <span className="text-xs">💨 PULL BACK 💨</span>
+                <span className="text-[7px] font-mono opacity-60">TAP WITHIN 220ms WINDOW</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
-      {/* GAME arena floor split */}
-      <div className="flex-grow flex flex-col justify-between p-4 py-8 relative">
+      {/* 2. MAIN ARENA CONTAINER */}
+      <div className="flex-grow flex flex-col justify-between p-4 py-8 relative overflow-hidden">
+        
+        {/* UPPER HUD CONTROLS OVERLAY */}
+        <div className="absolute top-2 left-2 right-2 flex justify-between items-center z-30 pointer-events-none">
+          <button
+            onClick={onQuit}
+            id="btn-quit-match-overlay"
+            className="p-1 px-2.5 rounded-lg bg-black/60 border border-slate-905 pointer-events-auto text-[9px] font-bold text-slate-400 hover:text-white uppercase tracking-wider"
+          >
+            Quit
+          </button>
+          {isOnline && (
+            <span className="px-2 py-0.5 rounded bg-emerald-950 border border-emerald-850 text-emerald-400 font-mono text-[9px] uppercase tracking-widest font-bold">
+              ROOM: {roomId}
+            </span>
+          )}
+          {isLocalSamePhone && (
+            <button
+              onClick={() => setRotateTopControls(!rotateTopControls)}
+              id="btn-toggle-top-rotate-slap"
+              className="p-1.5 rounded-lg bg-black/60 border border-slate-905 pointer-events-auto text-[8px] uppercase tracking-wider text-slate-400 hover:text-white font-bold flex items-center gap-1"
+            >
+              <RefreshCw className="w-2.5 h-2.5" />
+              <span>Rotate P2: {rotateTopControls ? 'ON' : 'OFF'}</span>
+            </button>
+          )}
+        </div>
+
         <div className="absolute inset-x-0 top-1/4 bottom-1/4 retro-grid-green opacity-20 pointer-events-none" />
 
         {/* GREEN PLAYER DISPLAY AREA (P2) */}
         <div className="w-full flex flex-col items-center">
           
-          <div className={`w-full max-w-sm mb-4 leading-normal ${(!isOnline && rotateTopControls && onlineSide === undefined) ? 'transform rotate-180' : ''}`}>
+          <div className={`w-full max-w-sm mb-4 leading-normal ${isLocalSamePhone && rotateTopControls ? 'transform rotate-180' : ''}`}>
             
             {/* Lives and roles headers */}
             <div className="flex justify-between items-center mb-1">
@@ -592,7 +747,7 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
                   <Heart
                     key={i}
                     className={`w-3.5 h-3.5 ${
-                      i < p2Hearts ? 'text-emerald-400 fill-emerald-500' : 'text-slate-800'
+                      i < p2Hearts ? 'text-emerald-400 fill-emerald-505' : 'text-slate-850'
                     }`}
                   />
                 ))}
@@ -600,8 +755,8 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
             </div>
 
             {/* Penalty strikes indicator */}
-            <div className="flex justify-end space-x-1 mt-1">
-              <span className="text-[8px] text-slate-500 font-mono">Panic dodging penalties:</span>
+            <div className="flex justify-start space-x-1 mt-1">
+              <span className="text-[8px] text-slate-555 font-mono">Panic dodging penalties:</span>
               <div className="flex space-x-0.5">
                 {[...Array(3)].map((_, i) => (
                   <div
@@ -618,15 +773,24 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
 
           </div>
 
-          {/* Character head visualization */}
-          <div className="relative">
-            <div className={`w-20 h-20 rounded-full border-4 flex items-center justify-center overflow-hidden bg-slate-900 shadow-xl relative z-10 ${
-              p2State === 'hit' ? 'border-yellow-400 animate-head-shake' : 'border-emerald-505'
+          {/* Character visual ring */}
+          <div className="relative mt-2">
+            {p2State === 'slapping' && (
+              <motion.div 
+                initial={{ scale: 0.8 }}
+                animate={{ scale: 1.3, y: 15 }}
+                className="absolute -bottom-4 z-20 text-3xl"
+              >
+                💥
+              </motion.div>
+            )}
+
+            <div className={`w-16 h-16 rounded-full border-4 flex items-center justify-center overflow-hidden bg-slate-900 shadow-xl ${
+              p2State === 'hit' ? 'border-yellow-405 animate-head-shake' : 'border-emerald-500'
             }`}>
               {renderHeadAvatar(p2, p2State)}
             </div>
 
-            {/* Virtual Slapping indicator */}
             {p2State === 'dodging' && (
               <span className="absolute -bottom-2 inset-x-0 text-center text-[9px] font-mono font-bold bg-amber-950 text-amber-400 border border-amber-850 py-0.5 rounded uppercase tracking-wider">
                 Dodged!
@@ -636,67 +800,38 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
 
         </div>
 
-        {/* INTERACTIVE HAND TRACKS (THE CORE FIST SHOWDOWN AT THE CENTER) */}
-        <div className="relative flex-grow flex flex-col items-center justify-center my-6 h-56 max-w-sm mx-auto w-full">
-          
-          {/* Status text popup ticker */}
-          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-black/80 border border-slate-850 px-3.5 py-1.5 rounded-xl z-10 text-center shadow-lg shadow-black/80 pointer-events-none">
-            <span className="text-[10px] font-black uppercase tracking-widest text-glow-red text-red-400 font-mono animate-pulse block">
-              {message}
-            </span>
-            {attackerIndex === 0 ? (
-              <span className="text-[8px] text-rose-500 font-bold block uppercase mt-0.5">Red Attacks 🥊</span>
+        {/* COMBAT REVOLVING TICKER LOG HISTORY */}
+        <div className="w-full flex justify-center py-2 pointer-events-none relative z-11">
+          <div className="w-64 bg-slate-900/90 border border-slate-800/80 rounded-xl p-1.5 px-3 flex flex-col items-center justify-center shadow-lg">
+            {combatLogs.length === 0 ? (
+              <span className="text-[8px] text-slate-500 uppercase tracking-widest font-mono animate-pulse">👋 Ready to Slap! 👋</span>
             ) : (
-              <span className="text-[8px] text-emerald-400 font-bold block uppercase mt-0.5">Green Attacks 🥊</span>
+              <div className="w-full space-y-0.5 text-center">
+                {combatLogs.slice(0, 3).map((log) => (
+                  <div key={log.id} className={`text-[9px] uppercase font-mono tracking-tight leading-3 truncate ${log.color}`}>
+                    {log.text}
+                  </div>
+                ))}
+              </div>
             )}
           </div>
-
-          {/* Player Green Hand Element at top */}
-          <motion.div
-            className="absolute origin-top flex flex-col items-center"
-            style={{ top: '10px' }}
-            animate={{
-              y: p2State === 'slapping' ? 95 : p2State === 'faking' ? 35 : p2State === 'dodging' ? -25 : 0,
-              rotate: p2State === 'hit' ? [0, 15, -15, 0] : 0,
-              opacity: p2State === 'hit' ? 0.75 : 1
-            }}
-            transition={{ type: 'spring', damping: 8, stiffness: 190 }}
-          >
-            {/* Custom vector shaped Green fighter hand */}
-            <div className="w-16 h-20 bg-gradient-to-b from-emerald-500 to-emerald-700 hover:opacity-90 rounded-b-3xl border-2 border-emerald-450 shadow-md relative flex items-center justify-center">
-              <span className="text-xl">🖐️</span>
-              {/* Fake lines */}
-              {p2State === 'faking' && <div className="absolute inset-0 bg-yellow-500/20 rounded-b-3xl border border-dashed border-yellow-500" />}
-            </div>
-            <span className="text-[9px] font-bold tracking-wider text-emerald-400 mt-1 uppercase font-mono">P2 Track</span>
-          </motion.div>
-
-          {/* Player Red Hand Element at bottom */}
-          <motion.div
-            className="absolute origin-bottom flex flex-col items-center"
-            style={{ bottom: '10px' }}
-            animate={{
-              y: p1State === 'slapping' ? -95 : p1State === 'faking' ? -35 : p1State === 'dodging' ? 25 : 0,
-              rotate: p1State === 'hit' ? [0, -15, 15, 0] : 0,
-              opacity: p1State === 'hit' ? 0.75 : 1
-            }}
-            transition={{ type: 'spring', damping: 8, stiffness: 190 }}
-          >
-            <span className="text-[9px] font-bold tracking-wider text-rose-500 mb-1 uppercase font-mono">P1 Track</span>
-            {/* Custom vector shaped Red fighter hand */}
-            <div className="w-16 h-20 bg-gradient-to-t from-red-600 to-red-800 rounded-t-3xl border-2 border-red-500 shadow-md relative flex items-center justify-center">
-              <span className="text-xl">🖐️</span>
-              {p1State === 'faking' && <div className="absolute inset-0 bg-yellow-500/20 rounded-t-3xl border border-dashed border-yellow-500" />}
-            </div>
-          </motion.div>
-
         </div>
 
         {/* RED PLAYER DISPLAY AREA (P1) */}
-        <div className="w-full flex flex-col items-center pb-2">
+        <div className="w-full flex flex-col items-center">
           
-          <div className="relative">
-            <div className={`w-20 h-20 rounded-full border-4 flex items-center justify-center overflow-hidden bg-slate-900 shadow-xl relative z-10 ${
+          <div className="relative mb-2">
+            {p1State === 'slapping' && (
+              <motion.div 
+                initial={{ scale: 0.8 }}
+                animate={{ scale: 1.3, y: -15 }}
+                className="absolute -top-4 z-20 text-3xl"
+              >
+                💥
+              </motion.div>
+            )}
+
+            <div className={`w-16 h-16 rounded-full border-4 flex items-center justify-center overflow-hidden bg-slate-900 shadow-xl ${
               p1State === 'hit' ? 'border-yellow-400 animate-head-shake' : 'border-rose-500'
             }`}>
               {renderHeadAvatar(p1, p1State)}
@@ -728,7 +863,7 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
                   <Heart
                     key={i}
                     className={`w-3.5 h-3.5 ${
-                      i < p1Hearts ? 'text-rose-500 fill-rose-600' : 'text-slate-800'
+                      i < p1Hearts ? 'text-rose-500 fill-rose-600' : 'text-slate-850'
                     }`}
                   />
                 ))}
@@ -737,13 +872,13 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
 
             {/* Penalty strikes indicator */}
             <div className="flex justify-start space-x-1 mt-1">
-              <span className="text-[8px] text-slate-500 font-mono">Panic dodging penalties:</span>
+              <span className="text-[8px] text-slate-555 font-mono">Panic dodging penalties:</span>
               <div className="flex space-x-0.5">
                 {[...Array(3)].map((_, i) => (
                   <div
                     key={i}
                     className={`w-2.5 h-2.5 rounded-full border border-slate-800 flex items-center justify-center text-[7px] font-black leading-none ${
-                      i < p1Penalties ? 'bg-orange-600 text-white' : 'bg-slate-950 text-slate-700'
+                      i < p1Penalties ? 'bg-orange-600 text-white' : 'bg-slate-950 text-slate-705'
                     }`}
                   >
                     X
@@ -758,59 +893,57 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
 
       </div>
 
-      {/* SCREEN DUAL ACTION PANEL (BOTTOM HALF WITH PADS) */}
-      <div className="h-56 w-full shrink-0 grid grid-rows-2 border-t border-slate-900 z-20 relative bg-slate-950">
+      {/* 3. CONTROL PADS SPANELS SPLIT-GRID */}
+      <div className={`w-full shrink-0 ${isLocalSamePhone ? 'p-2 bg-slate-950 border-t border-slate-900' : 'h-52 grid grid-rows-2 border-t border-slate-900 bg-slate-950 relative z-20'}`}>
         
         {/* PLAYER GREEN (TOP) CONTROLS PANEL */}
-        <div className={`p-2 bg-slate-950 border-b border-slate-900/60 flex items-center justify-center relative select-none ${
-          (!isOnline && rotateTopControls && onlineSide === undefined) ? 'transform rotate-180' : ''
-        }`}>
-          {!showOpponentPlayerControls && (
-            <div className="absolute inset-0 bg-black/75 z-40 flex items-center justify-center border-b border-slate-850">
-              <span className="text-[10px] font-bold text-slate-500 tracking-widest uppercase font-mono">
-                Remote Fighter Control Window
-              </span>
-            </div>
-          )}
-
-          <div className="grid grid-cols-3 gap-2 w-full max-w-sm h-full">
-            {attackerIndex === 1 ? (
-              /* If Green is Attacking: Slap and Fake */
-              <>
-                <button
-                  onClick={() => tapFake(1)}
-                  id="btn-p2-fake"
-                  disabled={countdown !== null || winner !== null}
-                  className="bg-yellow-950/40 hover:bg-yellow-900/10 border border-yellow-900/50 text-yellow-405 font-extrabold text-[10px] uppercase rounded-xl flex flex-col items-center justify-center px-1"
-                >
-                  <span>SLAP FAKE</span>
-                  <span className="text-[7px] font-mono opacity-50">BAIT DODGER</span>
-                </button>
-                
-                <button
-                  onClick={() => tapSlap(1)}
-                  id="btn-p2-slap"
-                  disabled={countdown !== null || winner !== null}
-                  className="col-span-2 bg-gradient-to-r from-emerald-600 to-teal-600 active:from-emerald-700 text-white font-extrabold text-xs uppercase rounded-xl flex flex-col items-center justify-center"
-                >
-                  <span className="text-sm">⚡ SLAP DUEL ⚡</span>
-                  <span className="text-[8px] font-mono tracking-wider opacity-90">TAP TO LAND HIT</span>
-                </button>
-              </>
-            ) : (
-              /* If Green is Defending: Dodge */
-              <button
-                onClick={() => tapDodge(1)}
-                id="btn-p2-sub-dodge"
-                disabled={countdown !== null || winner !== null}
-                className="col-span-3 bg-indigo-950 active:bg-indigo-900 border border-indigo-850 text-indigo-400 font-extrabold text-sm tracking-wider uppercase rounded-xl flex flex-col items-center justify-center"
-              >
-                <span className="text-lg">💨 PULL BACK 💨</span>
-                <span className="text-[8px] font-mono opacity-60">TAP WITHIN 220ms WINDOW</span>
-              </button>
+        {!isLocalSamePhone && (
+          <div className="p-2 bg-slate-950 border-b border-slate-900/60 flex items-center justify-center relative select-none">
+            {!showOpponentPlayerControls && (
+              <div className="absolute inset-0 bg-black/75 z-40 flex items-center justify-center border-b border-slate-850">
+                <span className="text-[10px] font-bold text-slate-500 tracking-widest uppercase font-mono">
+                  Remote Fighter Control Window
+                </span>
+              </div>
             )}
+
+            <div className="grid grid-cols-3 gap-2 w-full max-w-sm h-full">
+              {attackerIndex === 1 ? (
+                <>
+                  <button
+                    onClick={() => tapFake(1)}
+                    id="btn-p2-fake"
+                    disabled={countdown !== null || winner !== null}
+                    className="bg-yellow-950/40 hover:bg-yellow-900/10 border border-yellow-900/50 text-yellow-405 font-extrabold text-[10px] uppercase rounded-xl flex flex-col items-center justify-center px-1"
+                  >
+                    <span>SLAP FAKE</span>
+                    <span className="text-[7px] font-mono opacity-50">BAIT DODGER</span>
+                  </button>
+                  
+                  <button
+                    onClick={() => tapSlap(1)}
+                    id="btn-p2-slap"
+                    disabled={countdown !== null || winner !== null}
+                    className="col-span-2 bg-gradient-to-r from-emerald-600 to-teal-650 active:from-emerald-700 text-white font-extrabold text-xs uppercase rounded-xl flex flex-col items-center justify-center"
+                  >
+                    <span className="text-sm">⚡ SLAP DUEL ⚡</span>
+                    <span className="text-[8px] font-mono tracking-wider opacity-90">TAP TO LAND HIT</span>
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => tapDodge(1)}
+                  id="btn-p2-sub-dodge"
+                  disabled={countdown !== null || winner !== null}
+                  className="col-span-3 bg-indigo-950 active:bg-indigo-900 border border-indigo-850 text-indigo-400 font-extrabold text-sm tracking-wider uppercase rounded-xl flex flex-col items-center justify-center"
+                >
+                  <span className="text-lg">💨 PULL BACK 💨</span>
+                  <span className="text-[8px] font-mono opacity-60">TAP WITHIN 220ms WINDOW</span>
+                </button>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* PLAYER RED (BOTTOM) CONTROLS PANEL */}
         <div className="p-2 bg-slate-950 flex items-center justify-center relative select-none">
@@ -824,7 +957,6 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
 
           <div className="grid grid-cols-3 gap-2 w-full max-w-sm h-full">
             {attackerIndex === 0 ? (
-              /* If Red is Attacking */
               <>
                 <button
                   onClick={() => tapFake(0)}
@@ -847,7 +979,6 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
                 </button>
               </>
             ) : (
-              /* If Red is Defending */
               <button
                 onClick={() => tapDodge(0)}
                 id="btn-p1-sub-dodge"
@@ -882,8 +1013,8 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
               >
                 {countdown === 0 ? 'DUEL!' : countdown}
               </motion.span>
-              <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider px-4 block">
-                Do not blink! Quick dodge baited fakes or suffer a slap!
+               <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider px-4 block">
+                Do not blink! Quick dodge fakes or suffer a slap!
               </span>
             </div>
           </motion.div>
@@ -898,7 +1029,7 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
             animate={{ scale: 1, opacity: 1 }}
             className="absolute inset-0 bg-slate-950/95 z-55 flex flex-col items-center justify-center p-6 text-center"
           >
-            <div className="absolute top-0 inset-x-0 bottom-0 retro-gridopacity-20 pointer-events-none" />
+            <div className="absolute top-0 inset-x-0 bottom-0 retro-grid opacity-20 pointer-events-none" />
 
             <div className="relative z-10 w-full max-w-sm space-y-6">
               
@@ -915,7 +1046,7 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
 
               {/* Winner head decoration */}
               <div className={`mx-auto w-24 h-24 rounded-full border-4 flex items-center justify-center overflow-hidden bg-slate-900 shadow-2xl relative ${
-                winner.color === 'red' ? 'border-red-500 shadow-red-950' : 'border-emerald-505 shadow-emerald-950'
+                winner.color === 'red' ? 'border-red-500 shadow-red-950' : 'border-emerald-500 shadow-emerald-950'
               }`}>
                 {renderHeadAvatar(winner, 'idle')}
                 <div className="absolute top-1 right-1 bg-yellow-500 rounded-full p-1 border border-black shadow">
