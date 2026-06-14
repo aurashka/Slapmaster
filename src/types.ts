@@ -1,6 +1,7 @@
 export type GameMode = 'menu' | 'setup' | 'boxing_fight' | 'slapping_duel' | 'how_to_play';
 
 export interface PlayerCustomization {
+  id?: string;
   name: string;
   color: 'red' | 'green';
   avatarType: 'default' | 'camera';

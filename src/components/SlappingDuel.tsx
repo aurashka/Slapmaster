@@ -12,9 +12,10 @@ interface SlappingDuelProps {
   roomId?: string;
   onlineSide?: 0 | 1; // null/undefined for local Same-Device or Vs AI
   onQuit: () => void;
+  isVsAI?: boolean;
 }
 
-export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: SlappingDuelProps) {
+export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit, isVsAI }: SlappingDuelProps) {
   const isOnline = !!roomId;
 
   // 5 Lives / Hearts per player
@@ -91,9 +92,41 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
   useEffect(() => {
     if (!isOnline) {
       // Offline local AI routine if opponent is a Bot
-      const isOpponentAI = onlineSide === undefined && (p2.name.includes('Bot') || p2.name.includes('Giga') || p2.name.includes('Slayer') || p2.name.includes('Tyson') || p2.name.includes('Phantom') || p2.name.includes('Rocky'));
+      const isOpponentAI = isVsAI || (onlineSide === undefined && (p2.name.includes('Bot') || p2.id?.startsWith('bot_')));
       if (isOpponentAI) {
-        const isHard = p2.name.includes('Giga') || p2.name.includes('Slayer') || p2.name.includes('Tyson');
+        let actionInterval = 1100;
+        let fakeRatio = 0.35;
+        let slapRatio = 0.55;
+        let reactionDelay = 380;
+
+        const botIdStr = p2.id || '';
+        const botNameStr = p2.name.toLowerCase();
+        const isEasy = botIdStr === 'bot_easy' || botNameStr.includes('easy');
+        const isHard = botIdStr === 'bot_hard' || botNameStr.includes('hard');
+        const isNightmare = botIdStr === 'bot_nightmare' || botNameStr.includes('nightmare');
+        const isOneshot = botIdStr === 'bot_oneshot' || botNameStr.includes('oneshot');
+
+        if (isEasy) {
+          actionInterval = 1350;
+          fakeRatio = 0.20;
+          slapRatio = 0.35;
+          reactionDelay = 480;
+        } else if (isHard) {
+          actionInterval = 750;
+          fakeRatio = 0.30;
+          slapRatio = 0.60;
+          reactionDelay = 320;
+        } else if (isNightmare) {
+          actionInterval = 480;
+          fakeRatio = 0.40;
+          slapRatio = 0.80; // extremely active
+          reactionDelay = 220;
+        } else if (isOneshot) {
+          actionInterval = 580;
+          fakeRatio = 0.35;
+          slapRatio = 0.70;
+          reactionDelay = 260;
+        }
         
         const aiInterval = setInterval(() => {
           if (!stateActiveRef.current) return;
@@ -101,28 +134,19 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
           // AI Attacking loop (smarter and faster combo triggers)
           if (attackerIndex === 1) {
             const rand = Math.random();
-            if (isHard) {
-              if (rand < 0.28) {
-                executeAIFakeAction();
-                // Baited combo slap follow-up shortly after fake
-                setTimeout(() => {
-                  if (stateActiveRef.current && attackerIndex === 1) {
-                    executeAISlapAction();
-                  }
-                }, 380);
-              } else if (rand < 0.58) {
-                executeAISlapAction();
-              }
-            } else {
-              // Easy AI
-              if (rand < 0.18) {
-                executeAISlapAction();
-              } else if (rand < 0.32) {
-                executeAIFakeAction();
-              }
+            if (rand < fakeRatio) {
+              executeAIFakeAction();
+              // Baited combo slap follow-up shortly after fake
+              setTimeout(() => {
+                if (stateActiveRef.current && attackerIndex === 1) {
+                  executeAISlapAction();
+                }
+              }, reactionDelay);
+            } else if (rand < fakeRatio + slapRatio) {
+              executeAISlapAction();
             }
           }
-        }, isHard ? 650 : 1100);
+        }, actionInterval);
 
         return () => clearInterval(aiInterval);
       }
@@ -404,17 +428,39 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
       addLog(`👋 ${p1.name} initiated slap!`, 'action');
 
       // AI reaction triggers as defender if VS AI
-      const opponentIsBot = onlineSide === undefined && (p2.name.includes('Bot') || p2.name.includes('Giga') || p2.name.includes('Slayer') || p2.name.includes('Tyson') || p2.name.includes('Phantom') || p2.name.includes('Rocky'));
+      const opponentIsBot = isVsAI || (onlineSide === undefined && (p2.name.includes('Bot') || p2.id?.startsWith('bot_')));
       if (opponentIsBot && p2State === 'idle') {
-        const isHard = p2.name.includes('Giga') || p2.name.includes('Slayer') || p2.name.includes('Tyson');
-        const reactChance = isHard ? 0.75 : 0.40; // 75% on hard to dodge slap correctly!
+        let reactChance = 0.40;
+        let reactDelay = 130;
+
+        const botIdStr = p2.id || '';
+        const botNameStr = p2.name.toLowerCase();
+        const isEasy = botIdStr === 'bot_easy' || botNameStr.includes('easy');
+        const isHard = botIdStr === 'bot_hard' || botNameStr.includes('hard');
+        const isNightmare = botIdStr === 'bot_nightmare' || botNameStr.includes('nightmare');
+        const isOneshot = botIdStr === 'bot_oneshot' || botNameStr.includes('oneshot');
+
+        if (isEasy) {
+          reactChance = 0.18;
+          reactDelay = 160;
+        } else if (isHard) {
+          reactChance = 0.55;
+          reactDelay = 95;
+        } else if (isNightmare) {
+          reactChance = 0.85;
+          reactDelay = 60;
+        } else if (isOneshot) {
+          reactChance = 0.92;
+          reactDelay = 40;
+        }
+
         if (Math.random() < reactChance) {
           setTimeout(() => {
             if (stateActiveRef.current && attackerIndex === 0) {
               setP2State('dodging');
               setTimeout(() => setP2State('idle'), 450);
             }
-          }, isHard ? 60 : 130);
+          }, reactDelay);
         }
       }
       
@@ -460,13 +506,20 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
         } else {
           playSlapSound();
           setP1State('hit');
-          addLog(`💥 ${p2.name} hit ${p1.name}!`, 'hit');
+          let damage = 1;
+          if (isVsAI || p2.id?.startsWith('bot_')) {
+            const botId = p2.id || '';
+            if (botId === 'bot_oneshot') {
+              damage = 5; // Direct defeat instantly!
+            }
+          }
+          addLog(`💥 ${p2.name} hit ${p1.name} for ${damage} HP!`, 'hit');
           setP1Hearts(prev => {
-            const next = Math.max(0, prev - 1);
+            const next = Math.max(0, prev - damage);
             if (next === 0) triggerMatchWin(p2);
             return next;
           });
-          setMessage('SLAP LANDED! Green scores!');
+          setMessage(damage === 5 ? '⚡ FATAL ONE-SHOT BY THE BOT! ⚡' : 'SLAP LANDED! Green scores!');
           setTimeout(() => setP1State('idle'), 400);
         }
       }, 210);
@@ -497,10 +550,27 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
       addLog(`👀 ${p1.name} made a faked jab!`, 'action');
 
       // AI reaction triggers as defender if VS AI
-      const opponentIsBot = onlineSide === undefined && (p2.name.includes('Bot') || p2.name.includes('Giga') || p2.name.includes('Slayer') || p2.name.includes('Tyson') || p2.name.includes('Phantom') || p2.name.includes('Rocky'));
+      const opponentIsBot = isVsAI || (onlineSide === undefined && (p2.name.includes('Bot') || p2.id?.startsWith('bot_')));
       if (opponentIsBot && p2State === 'idle') {
-        const isHard = p2.name.includes('Giga') || p2.name.includes('Slayer') || p2.name.includes('Tyson');
-        const baitChance = isHard ? 0.22 : 0.50; // hard gets baited fewer times!
+        let baitChance = 0.40;
+
+        const botIdStr = p2.id || '';
+        const botNameStr = p2.name.toLowerCase();
+        const isEasy = botIdStr === 'bot_easy' || botNameStr.includes('easy');
+        const isHard = botIdStr === 'bot_hard' || botNameStr.includes('hard');
+        const isNightmare = botIdStr === 'bot_nightmare' || botNameStr.includes('nightmare');
+        const isOneshot = botIdStr === 'bot_oneshot' || botNameStr.includes('oneshot');
+
+        if (isEasy) {
+          baitChance = 0.65;
+        } else if (isHard) {
+          baitChance = 0.30;
+        } else if (isNightmare) {
+          baitChance = 0.15;
+        } else if (isOneshot) {
+          baitChance = 0.08;
+        }
+
         if (Math.random() < baitChance) {
           setTimeout(() => {
             if (stateActiveRef.current && attackerIndex === 0) {
@@ -646,8 +716,8 @@ export default function SlappingDuel({ p1, p2, roomId, onlineSide, onQuit }: Sla
 
   // Determine active view states
   const showActivePlayerControls = onlineSide === undefined || onlineSide === 0;
-  const showOpponentPlayerControls = onlineSide === undefined || onlineSide === 1;
-  const isLocalSamePhone = !isOnline && onlineSide === undefined;
+  const showOpponentPlayerControls = (onlineSide === undefined || onlineSide === 1) && !isVsAI;
+  const isLocalSamePhone = !isOnline && onlineSide === undefined && !isVsAI;
 
   return (
     <div className="flex flex-col h-full w-full bg-slate-950 text-white font-sans overflow-hidden relative select-none justify-between">

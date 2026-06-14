@@ -12,6 +12,7 @@ interface BoxingFightProps {
   roomId?: string;
   onlineSide?: 0 | 1; // 0 for Red, 1 for Green
   onQuit: () => void;
+  isVsAI?: boolean;
 }
 
 interface ComicBurst {
@@ -22,7 +23,7 @@ interface ComicBurst {
   color: string;
 }
 
-export default function BoxingFight({ p1, p2, roomId, onlineSide, onQuit }: BoxingFightProps) {
+export default function BoxingFight({ p1, p2, roomId, onlineSide, onQuit, isVsAI }: BoxingFightProps) {
   const isOnline = !!roomId;
   
   // Players battle states
@@ -95,24 +96,54 @@ export default function BoxingFight({ p1, p2, roomId, onlineSide, onQuit }: Boxi
   useEffect(() => {
     if (!isOnline) {
       // Offline local AI loop
-      const isOpponentAI = onlineSide === undefined && (p2.name.includes('Bot') || p2.name.includes('Giga') || p2.name.includes('Slayer') || p2.name.includes('Tyson') || p2.name.includes('Phantom') || p2.name.includes('Rocky'));
+      const isOpponentAI = isVsAI || (onlineSide === undefined && (p2.name.includes('Bot') || p2.id?.startsWith('bot_')));
       if (isOpponentAI) {
-        const isHard = p2.name.includes('Giga') || p2.name.includes('Slayer') || p2.name.includes('Tyson');
+        let attackThreshold = 0.20;
+        let actionInterval = 380;
+        let blockChance = 0.12;
+        let dodgeChance = 0.08;
+
+        const botIdStr = p2.id || '';
+        const botNameStr = p2.name.toLowerCase();
+        const isEasy = botIdStr === 'bot_easy' || botNameStr.includes('easy');
+        const isHard = botIdStr === 'bot_hard' || botNameStr.includes('hard');
+        const isNightmare = botIdStr === 'bot_nightmare' || botNameStr.includes('nightmare');
+        const isOneshot = botIdStr === 'bot_oneshot' || botNameStr.includes('oneshot');
+
+        if (isEasy) {
+          attackThreshold = 0.16;
+          blockChance = 0.06;
+          dodgeChance = 0.04;
+          actionInterval = 480;
+        } else if (isHard) {
+          attackThreshold = 0.35;
+          blockChance = 0.12;
+          dodgeChance = 0.10;
+          actionInterval = 280;
+        } else if (isNightmare) {
+          attackThreshold = 0.44;
+          blockChance = 0.15;
+          dodgeChance = 0.15;
+          actionInterval = 195;
+        } else if (isOneshot) {
+          attackThreshold = 0.38;
+          blockChance = 0.14;
+          dodgeChance = 0.18;
+          actionInterval = 230;
+        }
         
         const aiInterval = setInterval(() => {
           if (!matchActiveRef.current || p2Stunned) return;
           
           const rand = Math.random();
-          // Smarter attack rates (hard mode AI is highly aggressive with combo punches)
-          const attackThreshold = isHard ? 0.35 : 0.20;
           if (rand < attackThreshold) {
             p2PerformAction(rand < (attackThreshold / 2) ? 'punch_left' : 'punch_right');
-          } else if (rand < attackThreshold + 0.12) {
+          } else if (rand < attackThreshold + blockChance) {
             p2PerformAction('block');
-          } else if (rand < attackThreshold + 0.18) {
+          } else if (rand < attackThreshold + blockChance + dodgeChance) {
             p2PerformAction('dodge');
           }
-        }, isHard ? 280 : 380);
+        }, actionInterval);
         
         return () => clearInterval(aiInterval);
       }
@@ -349,9 +380,17 @@ export default function BoxingFight({ p1, p2, roomId, onlineSide, onQuit }: Boxi
       playHitSound();
       addBurst(false);
       setP1Action('hit');
-      addLog(`💥 ${p2.name} hit ${p1.name}!`, 'hit');
+      let damage = 10;
+      if (isVsAI || p2.id?.startsWith('bot_')) {
+        const botId = p2.id || '';
+        if (botId === 'bot_easy') damage = 7;
+        else if (botId === 'bot_hard') damage = 10;
+        else if (botId === 'bot_nightmare') damage = 16;
+        else if (botId === 'bot_oneshot') damage = 100; // Absolute One-Shot fatal power!
+      }
+      addLog(`💥 ${p2.name} hit ${p1.name} for ${damage} dmg!`, 'hit');
       setP1Health(prev => {
-        const next = Math.max(0, prev - 10);
+        const next = Math.max(0, prev - damage);
         if (next === 0) triggerMatchWin(p2);
         return next;
       });
@@ -393,17 +432,39 @@ export default function BoxingFight({ p1, p2, roomId, onlineSide, onQuit }: Boxi
     addLog(`🔴 ${p1.name} performed ${act === 'dodge' ? 'lean dodge' : act === 'block' ? 'block' : 'jab'}`, 'action');
 
     // AI reactive triggers if P1 punches and playing VS AI
-    const opponentIsBot = onlineSide === undefined && (p2.name.includes('Bot') || p2.name.includes('Giga') || p2.name.includes('Slayer') || p2.name.includes('Tyson') || p2.name.includes('Phantom') || p2.name.includes('Rocky'));
+    const opponentIsBot = isVsAI || (onlineSide === undefined && (p2.name.includes('Bot') || p2.id?.startsWith('bot_')));
     if (act.startsWith('punch') && opponentIsBot && !p2Stunned && p2Action === 'idle') {
-      const isHard = p2.name.includes('Giga') || p2.name.includes('Slayer') || p2.name.includes('Tyson');
-      const reactionChance = isHard ? 0.75 : 0.45; // 75% protective chance on hard setting!
+      let reactionChance = 0.45;
+      let reactionDelay = 150;
+      
+      const botIdStr = p2.id || '';
+      const botNameStr = p2.name.toLowerCase();
+      const isEasy = botIdStr === 'bot_easy' || botNameStr.includes('easy');
+      const isHard = botIdStr === 'bot_hard' || botNameStr.includes('hard');
+      const isNightmare = botIdStr === 'bot_nightmare' || botNameStr.includes('nightmare');
+      const isOneshot = botIdStr === 'bot_oneshot' || botNameStr.includes('oneshot');
+
+      if (isEasy) {
+        reactionChance = 0.15;
+        reactionDelay = 180;
+      } else if (isHard) {
+        reactionChance = 0.60;
+        reactionDelay = 100;
+      } else if (isNightmare) {
+        reactionChance = 0.85;
+        reactionDelay = 70;
+      } else if (isOneshot) {
+        reactionChance = 0.90;
+        reactionDelay = 50;
+      }
+
       if (Math.random() < reactionChance) {
         setTimeout(() => {
           if (matchActiveRef.current && !p2Stunned) {
             const defense = Math.random() < 0.55 ? 'block' : 'dodge';
             p2PerformAction(defense);
           }
-        }, isHard ? 80 : 150); // micro reflex speed delay
+        }, reactionDelay); // micro reflex speed delay
       }
     }
 

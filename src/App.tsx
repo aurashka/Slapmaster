@@ -141,6 +141,7 @@ export default function App() {
                   roomId={roomId}
                   onlineSide={onlineSide}
                   onQuit={quitToMenu}
+                  isVsAI={onlineSlot === 'ai'}
                 />
               </motion.div>
             )}
@@ -159,6 +160,7 @@ export default function App() {
                   roomId={roomId}
                   onlineSide={onlineSide}
                   onQuit={quitToMenu}
+                  isVsAI={onlineSlot === 'ai'}
                 />
               </motion.div>
             )}

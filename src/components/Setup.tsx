@@ -297,6 +297,7 @@ export default function Setup({ gameMode, onlineSlot, onComplete, onBack }: Setu
       };
 
       const aiFighter: PlayerCustomization = {
+        id: selectedAIBoss.id,
         name: selectedAIBoss.name,
         color: 'green',
         avatarType: 'default',
@@ -606,8 +607,11 @@ export default function Setup({ gameMode, onlineSlot, onComplete, onBack }: Setu
                       <span className="text-[9px] font-bold text-slate-100 uppercase leading-none">
                         {bot.name}
                       </span>
-                      <span className="text-[8px] text-amber-500 font-mono mt-1 font-bold">
-                        {bot.id === 'bot_slapper' ? 'EASY BRUISER' : 'GIGA BOSS'}
+                      <span className="text-[8px] text-amber-500 font-mono mt-1 font-bold block">
+                        {bot.id === 'bot_easy' && 'EASY MODE'}
+                        {bot.id === 'bot_hard' && 'HARD MODE'}
+                        {bot.id === 'bot_nightmare' && 'NIGHTMARE MODE'}
+                        {bot.id === 'bot_oneshot' && '☠️ ONESHOT FATAL ☠️'}
                       </span>
                     </div>
                   ))}

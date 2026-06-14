@@ -73,43 +73,43 @@ export const GREEN_PRESETS: DefaultAvatarPreset[] = [
 
 export const BOT_PRESETS: DefaultAvatarPreset[] = [
   {
-    id: 'bot_slapper',
-    name: 'Slayer Tyson (Bot)',
+    id: 'bot_easy',
+    name: 'Easy Level (Bot)',
     color: 'yellow',
-    emoji: '🥊',
-    gradient: 'from-amber-600 via-rose-800 to-amber-955',
-    border: 'border-amber-450',
-    avatarSvg: '⚡',
+    emoji: '👶',
+    gradient: 'from-blue-600 to-indigo-950',
+    border: 'border-blue-400',
+    avatarSvg: '🛡️',
     imageUrl: 'https://images.unsplash.com/photo-1549719386-74dfcbf7dbed?w=200&auto=format&fit=crop&q=80'
   },
   {
-    id: 'bot_chad',
-    name: 'Mega-Giga-Chad (Bot)',
+    id: 'bot_hard',
+    name: 'Hard Level (Bot)',
     color: 'yellow',
-    emoji: '🗿',
-    gradient: 'from-slate-700 via-zinc-800 to-slate-950',
-    border: 'border-amber-500',
-    avatarSvg: '🔩',
+    emoji: '💀',
+    gradient: 'from-amber-600 to-neutral-950',
+    border: 'border-amber-400',
+    avatarSvg: '⚡',
+    imageUrl: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=200&auto=format&fit=crop&q=80'
+  },
+  {
+    id: 'bot_nightmare',
+    name: 'Nightmare Level (Bot)',
+    color: 'yellow',
+    emoji: '👹',
+    gradient: 'from-purple-900 via-red-950 to-black',
+    border: 'border-purple-500',
+    avatarSvg: '🔥',
     imageUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80'
   },
   {
-    id: 'bot_phantom',
-    name: 'Ali Phantom (Bot)',
+    id: 'bot_oneshot',
+    name: 'Oneshot Level (Bot)',
     color: 'yellow',
-    emoji: '⚡',
-    gradient: 'from-indigo-600 to-purple-950',
-    border: 'border-indigo-400',
-    avatarSvg: '⭐',
+    emoji: '☠️',
+    gradient: 'from-red-650 via-black to-slate-950',
+    border: 'border-red-650',
+    avatarSvg: '⚠️',
     imageUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200&auto=format&fit=crop&q=80'
-  },
-  {
-    id: 'bot_rocky',
-    name: 'Rocky Stallone (Bot)',
-    color: 'yellow',
-    emoji: '👑',
-    gradient: 'from-red-600 via-rose-850 to-stone-900',
-    border: 'border-red-400',
-    avatarSvg: '🥇',
-    imageUrl: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=200&auto=format&fit=crop&q=80'
   }
 ];
